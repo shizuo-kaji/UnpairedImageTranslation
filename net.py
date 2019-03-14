@@ -89,6 +89,7 @@ class EqualizedDeconv2d(chainer.Chain):
             else:
                 self.c = L.Deconvolution2D(in_ch, out_ch, ksize, stride, pad, initialW=w, nobias=nobias,initial_bias=bias)
     def __call__(self, x):
+        h=x
         if self.equalised:
             b,c,_,_ = h.shape
             inv_c = np.sqrt(2.0/(c*self.ksize**2))
@@ -199,6 +200,39 @@ class CBR(chainer.Chain):
             h = self.activation(h)
         return h
 
+class LBR(chainer.Chain):
+    def __init__(self, height, width, ch, norm='none',
+                 activation=F.relu, dropout=False):
+        super(LBR, self).__init__()
+        self.activation = activation
+        self.dropout = dropout
+        self.use_norm = False if norm=='none' else True
+        self.ch = ch
+        self.width = width
+        self.height = height
+        with self.init_scope():
+            self.l0 = L.Linear(ch*height*width)
+            self.l1 = L.Linear(ch*height*width)
+            if self.use_norm:
+                self.norm = get_norm_layer(norm)(ch*height*width)
+
+    def __call__(self, x):
+        h = self.l0(x)
+        if self.use_norm:
+            h = self.norm(h)
+        if self.dropout:
+            h = F.dropout(h, ratio=self.dropout)
+        if self.activation is not None:
+            h = self.activation(h)
+        h = self.l1(h)
+        if self.use_norm:
+            h = self.norm(h)
+        if self.dropout:
+            h = F.dropout(h, ratio=self.dropout)
+        if self.activation is not None:
+            h = self.activation(h)
+        return F.reshape(h,(-1,self.ch,self.height,self.width))
+
 class Encoder(chainer.Chain):    ## we have to know the the number of input channels to decode!
     def __init__(self, args):
         super(Encoder, self).__init__()
@@ -267,7 +301,10 @@ class Generator(chainer.Chain):
         self.n_resblock = args.gen_nblock
         self.chs = args.gen_chs
         self.unet = args.unet
+        self.gen_fc = args.gen_fc
         with self.init_scope():
+            if self.gen_fc:
+                self.l0 = LBR(args.crop_height,args.crop_width,args.ch)
             self.c0 = CBR(args.ch, self.chs[0], norm=args.gen_norm, sample=args.gen_sample, activation=args.gen_activation, equalised=args.eqconv)
             for i in range(1,len(self.chs)):
                 setattr(self, 'd' + str(i), CBR(self.chs[i-1], self.chs[i], ksize=args.gen_ksize, norm=args.gen_norm, sample=args.gen_down, activation=args.gen_activation, dropout=args.gen_dropout, equalised=args.eqconv))
@@ -286,7 +323,11 @@ class Generator(chainer.Chain):
                 setattr(self, 'cl',CBR(self.chs[0], args.ch,norm='none', sample=args.gen_sample, activation=args.gen_out_activation, equalised=args.eqconv))
 
     def __call__(self, x):
-        h = [self.c0(x)]
+        if self.gen_fc:
+            h = self.l0(x)
+        else:
+            h=x
+        h = [self.c0(h)]
         for i in range(1,len(self.chs)):
             h.append(getattr(self, 'd' + str(i))(h[-1]))
 #            print(h[-1].data.shape)
@@ -380,3 +421,4 @@ class DiscriminatorZ(chainer.Chain):
         if self.wgan:
             h = self.fc(h)
         return h
+        

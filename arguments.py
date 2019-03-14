@@ -91,6 +91,8 @@ def arguments():
     parser.add_argument('--gen_out_activation', '-go', default='tanh', choices=activation.keys())
     parser.add_argument('--gen_chs', '-gc', type=int, nargs="*", default=[32,64,128],
                         help='Number of channels in down layers in generator; the first entry should coincide with the number of channels in the input images')
+    parser.add_argument('--gen_fc', '-gfc', action='store_true',
+                        help='use fc layers before convolutional layers')
     parser.add_argument('--gen_nblock', '-nb', type=int, default=9,
                         help='number of residual blocks in generators')
     parser.add_argument('--gen_ksize', '-gk', type=int, default=3,    # default 4
