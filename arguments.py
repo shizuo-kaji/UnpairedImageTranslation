@@ -45,6 +45,8 @@ def arguments():
                         help='floating point precision')
     parser.add_argument('--eqconv', '-eq', action='store_true',
                         help='Equalised Convolution')
+    parser.add_argument('--spconv', '-sp', action='store_true',
+                        help='Separable Convolution')
 
     # options for converter
     parser.add_argument('--output_analysis', '-oa', action='store_true',
@@ -107,7 +109,7 @@ def arguments():
                         help='dropout ratio for generator')
     parser.add_argument('--gen_norm', '-gn', default='instance',
                         choices=['instance', 'instance_aff','batch','batch_aff', 'rbatch', 'fnorm', 'none'])
-    parser.add_argument('--unet', '-u', default='with_last', choices=[None,'none','no_last','with_last'],
+    parser.add_argument('--unet', '-u', default='with_last', choices=['none','no_last','with_last'],
                         help='use u-net for generator')
     parser.add_argument('--gen_start', type=int, default=200,
                         help='start using discriminator for generator training after this number of iterations')

@@ -4,7 +4,6 @@ import glob
 
 from chainer.dataset import dataset_mixin
 import numpy as np
-import cupy as xp
 from PIL import Image
 
 from chainercv.transforms import random_crop

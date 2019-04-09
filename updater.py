@@ -3,6 +3,7 @@ import random
 import chainer
 import chainer.functions as F
 from chainer import Variable,cuda
+from chainer.links import VGG16Layers
 
 import losses
 
@@ -18,6 +19,8 @@ class Updater(chainer.training.StandardUpdater):
         self._buffer_y = losses.ImagePool(50 * self.args.batch_size)
         self.init_alpha = self.get_optimizer('opt_g').alpha
         self.report_start = 0 # self.args.warmup*10 ## start reporting
+        self.vgg = VGG16Layers()  # for perceptual loss
+        self.vgg.to_gpu()
 
     def update_core(self):
         opt_g = self.get_optimizer('opt_g')
@@ -111,10 +114,12 @@ class Updater(chainer.training.StandardUpdater):
                 loss_gen = loss_gen + self.args.lambda_domain * (loss_dom_x + loss_dom_y)
             if self.report_start<self._iter:
                 chainer.report({'loss_dom': loss_dom_x}, self.gen_f) 
-                chainer.report({'loss_dom': loss_dom_y}, self.gen_g) 
+                chainer.report({'loss_dom': loss_dom_y}, self.gen_g)
+
         ## images before/after conversion should look similar
         if self.args.lambda_identity_x > 0 or self._iter < self.args.warmup:
-            loss_id_x  = losses.loss_avg(x,x_y, ksize=self.args.id_ksize, norm='l2')
+            #loss_id_x = losses.loss_avg(x,x_y, ksize=self.args.id_ksize, norm='l2')
+            loss_id_x = losses.loss_perceptual(x,x_y,self.vgg)
             if self._iter < self.args.warmup:
                 loss_gen = loss_gen + max(self.args.lambda_identity_x,2.0) * loss_id_x
             else:
@@ -122,13 +127,15 @@ class Updater(chainer.training.StandardUpdater):
             if self.args.lambda_identity_x > 0 and self.report_start<self._iter:
                 chainer.report({'loss_id': loss_id_x}, self.gen_g)
         if self.args.lambda_identity_y > 0 or self._iter < self.args.warmup:
-            loss_id_y  = losses.loss_avg(y,y_x, ksize=self.args.id_ksize, norm='l2')
+#            loss_id_y  = losses.loss_avg(y,y_x, ksize=self.args.id_ksize, norm='l2')
+            loss_id_y = losses.loss_perceptual(y,y_x,self.vgg)
             if self._iter < self.args.warmup:
                 loss_gen = loss_gen + max(self.args.lambda_identity_y,2.0) * loss_id_y
             else:
                 loss_gen = loss_gen + self.args.lambda_identity_y * loss_id_y
             if self.args.lambda_identity_y > 0 and self.report_start<self._iter:
                 chainer.report({'loss_id': loss_id_y}, self.gen_f)
+
         if self.args.lambda_grad > 0:
             loss_grad_x = losses.loss_grad(x,x_y,self.args.grad_norm)
             loss_gen = loss_gen + self.args.lambda_grad * loss_grad_x
@@ -139,9 +146,9 @@ class Updater(chainer.training.StandardUpdater):
                 #chainer.report({'loss_grad': loss_grad_y}, self.gen_f)
         ## background should be preserved 
         if self.args.lambda_air > 0:
-            loss_air_x = self.args.lambda_air * losses.loss_range_comp(x,x_y,0.9,norm='l1')
-            loss_air_y = self.args.lambda_air * losses.loss_range_comp(y,y_x,0.9,norm='l1')
-            loss_gen = loss_gen +(loss_air_x+loss_air_y)
+            loss_air_x = losses.loss_range_comp(x,x_y,0.9,norm='l1')
+            loss_air_y = losses.loss_range_comp(y,y_x,0.9,norm='l1')
+            loss_gen = loss_gen + self.args.lambda_air * (loss_air_x+loss_air_y)
             if self.report_start<self._iter:
                 chainer.report({'loss_air': 0.1*loss_air_x}, self.gen_g)
                 chainer.report({'loss_air': 0.1*loss_air_y}, self.gen_f)

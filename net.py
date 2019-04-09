@@ -6,9 +6,8 @@ import chainer.links as L
 import numpy as np
 
 from instance_normalization import InstanceNormalization
-#from instancenorm import InstanceNormalization
 
-
+# normalisation selection
 def get_norm_layer(norm='instance'):
     # unchecked: init weight of bn
     ## NOTE: gamma and beta affects a lot
@@ -23,15 +22,13 @@ def get_norm_layer(norm='instance'):
     elif norm == 'instance_aff':
         norm_layer = functools.partial(InstanceNormalization, use_gamma=True, use_beta=True)
     elif norm == 'fnorm':
-        norm_layer = fnorm_wrapper
+        norm_layer = lambda x: feature_vector_normalization
     else:
         raise NotImplementedError(
             'normalization layer [%s] is not found' % norm)
     return norm_layer
 
-def fnorm_wrapper(ch):
-    return feature_vector_normalization
-
+# pixel-wise normalisation (along channel direction)
 def feature_vector_normalization(x, eps=1e-8):
     # x: (B, C, H, W)
     alpha = 1.0 / F.sqrt(F.mean(x*x, axis=1, keepdims=True) + eps)
@@ -63,7 +60,7 @@ class EqualizedConv2d(chainer.Chain):
             h = F.pad(x,[[0,0],[0,0],[self.pad,self.pad],[self.pad,self.pad]],mode='constant',constant_values=0) 
         if self.equalised:
             b,c,_,_ = h.shape
-            inv_c = np.sqrt(2.0/(c*self.ksize**2))
+            inv_c = np.sqrt(2.0/c)/self.ksize
             h = inv_c * h
         if self.separable:
             return self.pointwise(self.depthwise(h))
@@ -92,7 +89,7 @@ class EqualizedDeconv2d(chainer.Chain):
         h=x
         if self.equalised:
             b,c,_,_ = h.shape
-            inv_c = np.sqrt(2.0/(c*self.ksize**2))
+            inv_c = np.sqrt(2.0/c)/self.ksize
             h = inv_c * h
         if self.separable:
             h = self.pointwise(self.depthwise(h))
@@ -103,7 +100,7 @@ class EqualizedDeconv2d(chainer.Chain):
         return h
 
 class ResBlock(chainer.Chain):
-    def __init__(self, ch, norm='instance', activation=F.relu, equalised=False, separable=False):
+    def __init__(self, ch, norm='instance', activation=F.relu, equalised=False, separable=False, skip_conv=False):
         super(ResBlock, self).__init__()
         self.activation = activation
         self.use_norm = False if norm=='none' else True
@@ -111,6 +108,10 @@ class ResBlock(chainer.Chain):
         with self.init_scope():
             self.c0 = EqualizedConv2d(ch, ch, 3, 1, 1, pad_type='zero', equalised=equalised, nobias=nobias, separable=separable)
             self.c1 = EqualizedConv2d(ch, ch, 3, 1, 1, pad_type='zero', equalised=equalised, nobias=nobias, separable=separable)
+            if skip_conv:  # skip connection
+                self.cs = EqualizedConv2d(ch, ch, 1, 1, 0)
+            else:
+                self.cs = F.identity
             if self.use_norm:
                 self.norm0 = get_norm_layer(norm)(ch)
                 self.norm1 = get_norm_layer(norm)(ch)
@@ -123,12 +124,12 @@ class ResBlock(chainer.Chain):
         h = self.c1(h)
         if self.use_norm:
             h = self.norm1(h)
-        return self.activation(h + x)
+        return self.activation(h + self.cs(x))
 
 
 class CBR(chainer.Chain):
     def __init__(self, ch0, ch1, ksize=3, pad=1, norm='instance',
-                 sample='down', activation=F.relu, dropout=False, equalised=False):
+                 sample='down', activation=F.relu, dropout=False, equalised=False, separable=False):
         super(CBR, self).__init__()
         self.activation = activation
         self.dropout = dropout
@@ -138,18 +139,18 @@ class CBR(chainer.Chain):
 
         with self.init_scope():
             if sample == 'down':
-                self.c = EqualizedConv2d(ch0, ch1, ksize, 2, pad, equalised=equalised, nobias=nobias)
+                self.c = EqualizedConv2d(ch0, ch1, ksize, 2, pad, equalised=equalised, nobias=nobias, separable=separable)
             elif sample == 'none-7':
-                self.c = EqualizedConv2d(ch0, ch1, 7, 1, 3, pad_type='reflect', equalised=equalised, nobias=nobias) 
+                self.c = EqualizedConv2d(ch0, ch1, 7, 1, 3, pad_type='reflect', equalised=equalised, nobias=nobias, separable=separable) 
             elif sample == 'deconv':
-                self.c = EqualizedDeconv2d(ch0, ch1, ksize, 2, pad, equalised=equalised, nobias=nobias)
+                self.c = EqualizedDeconv2d(ch0, ch1, ksize, 2, pad, equalised=equalised, nobias=nobias, separable=separable)
             elif sample in ['unpool_res','maxpool_res','avgpool_res']:
-                self.c = EqualizedConv2d(ch0, ch1, ksize, 1, pad, equalised=equalised, nobias=nobias)
+                self.c = EqualizedConv2d(ch0, ch1, ksize, 1, pad, equalised=equalised, nobias=nobias, separable=separable)
                 if self.use_norm:
                     self.norm0 = get_norm_layer(norm)(ch1)
-                self.cr = EqualizedConv2d(ch1, ch1, ksize, 1, pad, equalised=equalised, nobias=nobias)
+                self.cr = EqualizedConv2d(ch1, ch1, ksize, 1, pad, equalised=equalised, nobias=nobias, separable=separable)
             else:
-                self.c = EqualizedConv2d(ch0, ch1, ksize, 1, pad, equalised=equalised, nobias=nobias)
+                self.c = EqualizedConv2d(ch0, ch1, ksize, 1, pad, equalised=equalised, nobias=nobias, separable=separable)
             if self.use_norm:
                 self.norm = get_norm_layer(norm)(ch1)
 
@@ -202,7 +203,7 @@ class CBR(chainer.Chain):
 
 class LBR(chainer.Chain):
     def __init__(self, height, width, ch, norm='none',
-                 activation=F.relu, dropout=False):
+                 activation=F.tanh, dropout=False):
         super(LBR, self).__init__()
         self.activation = activation
         self.dropout = dropout
@@ -211,8 +212,7 @@ class LBR(chainer.Chain):
         self.width = width
         self.height = height
         with self.init_scope():
-            self.l0 = L.Linear(ch*height*width)
-            self.l1 = L.Linear(ch*height*width)
+            self.l0 = L.Linear(ch*height*width,ch*height*width)
             if self.use_norm:
                 self.norm = get_norm_layer(norm)(ch*height*width)
 
@@ -224,14 +224,7 @@ class LBR(chainer.Chain):
             h = F.dropout(h, ratio=self.dropout)
         if self.activation is not None:
             h = self.activation(h)
-        h = self.l1(h)
-        if self.use_norm:
-            h = self.norm(h)
-        if self.dropout:
-            h = F.dropout(h, ratio=self.dropout)
-        if self.activation is not None:
-            h = self.activation(h)
-        return F.reshape(h,(-1,self.ch,self.height,self.width))
+        return F.reshape(h,x.shape)
 
 class Encoder(chainer.Chain):    ## we have to know the the number of input channels to decode!
     def __init__(self, args):
@@ -239,14 +232,22 @@ class Encoder(chainer.Chain):    ## we have to know the the number of input chan
         self.n_resblock = args.gen_nblock
         self.chs = args.gen_chs
         self.unet = args.unet
+        self.nfc = args.gen_fc
         with self.init_scope():
+            for i in range(args.gen_fc):
+                setattr(self, 'l' + str(i), LBR(args.crop_height,args.crop_width,args.ch, activation=args.gen_fc_activation))
             # nn.ReflectionPad2d in original
             self.c0 = CBR(args.ch, self.chs[0], norm=args.gen_norm, sample=args.gen_sample, activation=args.gen_activation, equalised=args.eqconv)
             for i in range(1,len(self.chs)):
-                setattr(self, 'd' + str(i), CBR(self.chs[i-1], self.chs[i], ksize=args.gen_ksize, norm=args.gen_norm, sample=args.gen_down, activation=args.gen_activation, dropout=args.gen_dropout, equalised=args.eqconv))
+                setattr(self, 'd' + str(i), CBR(self.chs[i-1], self.chs[i], ksize=args.gen_ksize, norm=args.gen_norm, sample=args.gen_down, activation=args.gen_activation, dropout=args.gen_dropout, equalised=args.eqconv, separable=args.spconv))
             for i in range(self.n_resblock):
-                setattr(self, 'r' + str(i), ResBlock(self.chs[-1], norm=args.gen_norm, activation=args.gen_activation, equalised=args.eqconv))
+                setattr(self, 'r' + str(i), ResBlock(self.chs[-1], norm=args.gen_norm, activation=args.gen_activation, equalised=args.eqconv, separable=args.spconv))
     def __call__(self, x):
+        h = x
+        for i in range(self.nfc):
+            h=getattr(self, 'l' + str(i))(h)
+        else:
+            h=x
         h = [self.c0(x)]  
         for i in range(1,len(self.chs)):
             h.append(getattr(self, 'd' + str(i))(h[-1]))
@@ -265,18 +266,18 @@ class Decoder(chainer.Chain):
         self.unet = args.unet
         with self.init_scope():
             for i in range(self.n_resblock):
-                setattr(self, 'r' + str(i), ResBlock(self.chs[-1], norm=args.gen_norm, activation=args.gen_activation, equalised=args.eqconv))
+                setattr(self, 'r' + str(i), ResBlock(self.chs[-1], norm=args.gen_norm, activation=args.gen_activation, equalised=args.eqconv, separable=args.spconv))
             if self.unet in ['no_last','with_last']:
                 for i in range(1,len(self.chs)):
-                    setattr(self, 'ua' + str(i), CBR(2*self.chs[-i], self.chs[-i-1], ksize=args.gen_ksize, norm=args.gen_norm, sample=args.gen_up, activation=args.gen_activation, dropout=args.gen_dropout, equalised=args.eqconv))
+                    setattr(self, 'ua' + str(i), CBR(2*self.chs[-i], self.chs[-i-1], ksize=args.gen_ksize, norm=args.gen_norm, sample=args.gen_up, activation=args.gen_activation, dropout=args.gen_dropout, equalised=args.eqconv, separable=args.spconv))
                 if self.unet=='no_last':
-                    setattr(self, 'cl',CBR(self.chs[0], args.ch, norm='none', sample=args.gen_sample, activation=args.gen_out_activation, equalised=args.eqconv))
+                    setattr(self, 'cl',CBR(self.chs[0], args.ch, norm='none', sample=args.gen_sample, activation=args.gen_out_activation, equalised=args.eqconv, separable=args.spconv))
                 else:
-                    setattr(self, 'cl',CBR(2*self.chs[0], args.ch, norm='none', sample=args.gen_sample, activation=args.gen_out_activation, equalised=args.eqconv))
+                    setattr(self, 'cl',CBR(2*self.chs[0], args.ch, norm='none', sample=args.gen_sample, activation=args.gen_out_activation, equalised=args.eqconv, separable=args.spconv))
             else:
                 for i in range(1,len(self.chs)):
-                    setattr(self, 'ua' + str(i), CBR(self.chs[-i], self.chs[-i-1], norm=args.gen_norm, sample=args.gen_up, activation=args.gen_activation, dropout=args.gen_dropout, equalised=args.eqconv))
-                setattr(self, 'cl',CBR(self.chs[0], args.ch, norm='none', sample=args.gen_sample, activation=args.gen_out_activation, equalised=args.eqconv))
+                    setattr(self, 'ua' + str(i), CBR(self.chs[-i], self.chs[-i-1], norm=args.gen_norm, sample=args.gen_up, activation=args.gen_activation, dropout=args.gen_dropout, equalised=args.eqconv, separable=args.spconv))
+                setattr(self, 'cl',CBR(self.chs[0], args.ch, norm='none', sample=args.gen_sample, activation=args.gen_out_activation, equalised=args.eqconv, separable=args.spconv))
 
     def __call__(self, h):
         e = h[-1]
@@ -301,32 +302,31 @@ class Generator(chainer.Chain):
         self.n_resblock = args.gen_nblock
         self.chs = args.gen_chs
         self.unet = args.unet
-        self.gen_fc = args.gen_fc
+        self.nfc = args.gen_fc
         with self.init_scope():
-            if self.gen_fc:
-                self.l0 = LBR(args.crop_height,args.crop_width,args.ch)
-            self.c0 = CBR(args.ch, self.chs[0], norm=args.gen_norm, sample=args.gen_sample, activation=args.gen_activation, equalised=args.eqconv)
+            for i in range(args.gen_fc):
+                setattr(self, 'l' + str(i), LBR(args.crop_height,args.crop_width,args.ch, activation=args.gen_fc_activation))
+            self.c0 = CBR(args.ch, self.chs[0], norm=args.gen_norm, sample=args.gen_sample, activation=args.gen_activation, equalised=args.eqconv, separable=args.spconv)
             for i in range(1,len(self.chs)):
-                setattr(self, 'd' + str(i), CBR(self.chs[i-1], self.chs[i], ksize=args.gen_ksize, norm=args.gen_norm, sample=args.gen_down, activation=args.gen_activation, dropout=args.gen_dropout, equalised=args.eqconv))
+                setattr(self, 'd' + str(i), CBR(self.chs[i-1], self.chs[i], ksize=args.gen_ksize, norm=args.gen_norm, sample=args.gen_down, activation=args.gen_activation, dropout=args.gen_dropout, equalised=args.eqconv, separable=args.spconv))
             for i in range(self.n_resblock):
-                setattr(self, 'r' + str(i), ResBlock(self.chs[-1], norm=args.gen_norm, activation=args.gen_activation, equalised=args.eqconv))
+                setattr(self, 'r' + str(i), ResBlock(self.chs[-1], norm=args.gen_norm, activation=args.gen_activation, equalised=args.eqconv, separable=args.spconv))
             if self.unet in ['no_last','with_last']:
                 for i in range(1,len(self.chs)):
-                    setattr(self, 'ua' + str(i), CBR(2*self.chs[-i], self.chs[-i-1],  norm=args.gen_norm, sample=args.gen_up, activation=args.gen_activation, dropout=args.gen_dropout, equalised=args.eqconv))
+                    setattr(self, 'ua' + str(i), CBR(2*self.chs[-i], self.chs[-i-1],  norm=args.gen_norm, sample=args.gen_up, activation=args.gen_activation, dropout=args.gen_dropout, equalised=args.eqconv, separable=args.spconv))
                 if self.unet=='no_last':
-                    setattr(self, 'cl',CBR(self.chs[0], args.ch,norm='none', sample=args.gen_sample, activation=args.gen_out_activation, equalised=args.eqconv))
+                    setattr(self, 'cl',CBR(self.chs[0], args.ch,norm='none', sample=args.gen_sample, activation=args.gen_out_activation, equalised=args.eqconv, separable=args.spconv))
                 else:
-                    setattr(self, 'cl',CBR(2*self.chs[0], args.ch, norm='none', sample=args.gen_sample, activation=args.gen_out_activation, equalised=args.eqconv))
+                    setattr(self, 'cl',CBR(2*self.chs[0], args.ch, norm='none', sample=args.gen_sample, activation=args.gen_out_activation, equalised=args.eqconv, separable=args.spconv))
             else:
                 for i in range(1,len(self.chs)):
-                    setattr(self, 'ua' + str(i), CBR(self.chs[-i], self.chs[-i-1], norm=args.gen_norm, sample=args.gen_up, activation=args.gen_activation, dropout=args.gen_dropout, equalised=args.eqconv))
-                setattr(self, 'cl',CBR(self.chs[0], args.ch,norm='none', sample=args.gen_sample, activation=args.gen_out_activation, equalised=args.eqconv))
+                    setattr(self, 'ua' + str(i), CBR(self.chs[-i], self.chs[-i-1], norm=args.gen_norm, sample=args.gen_up, activation=args.gen_activation, dropout=args.gen_dropout, equalised=args.eqconv, separable=args.spconv))
+                setattr(self, 'cl',CBR(self.chs[0], args.ch,norm='none', sample=args.gen_sample, activation=args.gen_out_activation, equalised=args.eqconv, separable=args.spconv))
 
     def __call__(self, x):
-        if self.gen_fc:
-            h = self.l0(x)
-        else:
-            h=x
+        h = x
+        for i in range(self.nfc):
+            h=getattr(self, 'l' + str(i))(h)
         h = [self.c0(h)]
         for i in range(1,len(self.chs)):
             h.append(getattr(self, 'd' + str(i))(h[-1]))
@@ -361,64 +361,29 @@ class Discriminator(chainer.Chain):
         with self.init_scope():
             self.c0 = CBR(None, base, ksize=args.dis_ksize, norm='none', 
                           sample=args.dis_sample, activation=args.dis_activation,
-                          dropout=args.dis_dropout, equalised=args.eqconv)
+                          dropout=args.dis_dropout, equalised=args.eqconv) #separable=args.spconv)
 
             for i in range(1, self.n_down_layers):
                 setattr(self, 'c' + str(i),
                         CBR(base, base * 2, ksize=args.dis_ksize, norm=args.dis_norm,
-                            sample=args.dis_down, activation=args.dis_activation, dropout=args.dis_dropout, equalised=args.eqconv))
+                            sample=args.dis_down, activation=args.dis_activation, dropout=args.dis_dropout, equalised=args.eqconv, separable=args.spconv))
                 base *= 2
 
-            self.csl = CBR(base, base * 2, ksize=args.dis_ksize, norm=args.dis_norm, sample='none', activation=args.dis_activation, dropout=args.dis_dropout, equalised=args.eqconv)
-            base *= 2
-            self.cl = CBR(base, 1, ksize=args.dis_ksize, norm='none', sample='none', activation=None, dropout=False, equalised=args.eqconv)
+            self.csl = CBR(base, base * 2, ksize=args.dis_ksize, norm=args.dis_norm, sample='none', activation=args.dis_activation, dropout=args.dis_dropout, equalised=args.eqconv, separable=args.spconv)
             if self.wgan:
                 self.fc = L.Linear(None, 1)
+            else:
+                base *= 2
+                self.cl = CBR(base, 1, ksize=args.dis_ksize, norm='none', sample='none', activation=None, dropout=False, equalised=args.eqconv, separable=args.spconv)
 
     def __call__(self, x):
         h = self.c0(x)
         for i in range(1, self.n_down_layers):
             h = getattr(self, 'c' + str(i))(h)
         h = self.csl(h)
-        h = self.cl(h)
         if self.wgan:
+            h = F.average(h, axis=(2, 3))  # Global pooling
             h = self.fc(h)
+        else:
+            h = self.cl(h)
         return h
-
-
-class DiscriminatorZ(chainer.Chain):
-    def __init__(self, args):
-        super(DiscriminatorZ, self).__init__()
-        pad = 1
-        base = args.dis_basech
-        self.n_down_layers = args.z_ndown
-        self.activation = args.dis_activation
-        self.wgan = args.wgan
-
-        with self.init_scope():
-            self.c0 = CBR(args.gen_chs[-1], base, ksize=args.dis_ksize, norm='none', 
-                          sample=args.dis_sample, activation=args.dis_activation,
-                          dropout=args.dis_dropout, equalised=args.eqconv)
-
-            for i in range(1, self.n_down_layers):
-                setattr(self, 'c' + str(i),
-                        CBR(base, base * 2, ksize=args.dis_ksize, pad=pad, norm=args.dis_norm,
-                            sample=args.dis_down, activation=args.dis_activation, dropout=args.dis_dropout, equalised=args.eqconv))
-                base *= 2
-
-            self.csl = CBR(base, base * 2, ksize=args.dis_ksize, pad=pad, norm=args.dis_norm, sample='none', activation=args.dis_activation, dropout=args.dis_dropout, equalised=args.eqconv)
-            base *= 2
-            self.cl = CBR(base, 1, ksize=args.dis_ksize, pad=pad, norm='none', sample='none', activation=None, dropout=False, equalised=args.eqconv)
-            if self.wgan:
-                self.fc = L.Linear(None, 1)
-
-    def __call__(self, x):
-        h = self.c0(x)
-        for i in range(1, self.n_down_layers):
-            h = getattr(self, 'c' + str(i))(h)
-        h = self.csl(h)
-        h = self.cl(h)
-        if self.wgan:
-            h = self.fc(h)
-        return h
-        

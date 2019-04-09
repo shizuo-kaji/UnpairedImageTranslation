@@ -92,7 +92,7 @@ def main():
     dec_y = net.Decoder(args)
     dis_x = net.Discriminator(args)
     dis_y = net.Discriminator(args)
-    dis_z = net.DiscriminatorZ(args)
+    dis_z = net.Discriminator(args)
     models = {'enc_x': enc_x, 'enc_y': enc_y, 'dec_x': dec_x, 'dec_y': dec_y, 'dis_x': dis_x, 'dis_y': dis_y, 'dis_z': dis_z}
     optimiser_files = []
 
