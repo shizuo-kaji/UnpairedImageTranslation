@@ -18,9 +18,8 @@ def get_norm_layer(norm='instance'):
     elif norm == 'rbatch':
         norm_layer = functools.partial(L.BatchRenormalization, use_gamma=False, use_beta=False)
     elif norm == 'instance':
+#        norm_layer = functools.partial(L.GroupNormalization, 1)   ## currently very slow
         norm_layer = functools.partial(InstanceNormalization, use_gamma=False, use_beta=False)
-    elif norm == 'instance_aff':
-        norm_layer = functools.partial(InstanceNormalization, use_gamma=True, use_beta=True)
     elif norm == 'fnorm':
         norm_layer = lambda x: feature_vector_normalization
     else:
@@ -99,6 +98,24 @@ class EqualizedDeconv2d(chainer.Chain):
             h = F.pad(h,[[0,0],[0,0],[0,1],[0,1]],mode='reflect')
         return h
 
+### the num of input channles should be divisible by 4
+# TODO: use F.depth2space
+class PixelShuffler(chainer.Chain):
+    def __init__(self, in_ch, out_ch, ksize, pad, nobias=False):
+        w = chainer.initializers.HeNormal()
+        bias = chainer.initializers.Zero()
+        super(PixelShuffler, self).__init__()
+        with self.init_scope():
+#            self.c1 = L.Convolution2D(in_ch, out_ch, 1, stride=1, pad=0, initialW=w, nobias=nobias,initial_bias=bias)
+            self.c = L.Convolution2D( int(in_ch / 4), out_ch, ksize, stride=1, pad=pad, initialW=w, nobias=nobias,initial_bias=bias)
+    def __call__(self, x):
+        B,C,H,W = x.shape
+        h = F.reshape(x, (B, 2, 2, int(C/4), H, W))
+        h = F.transpose(h, (0, 3, 4, 1, 5, 2))
+        h = F.reshape(h, (B, int(C/4), H*2, W*2))
+        return self.c(h)
+
+
 class ResBlock(chainer.Chain):
     def __init__(self, ch, norm='instance', activation=F.relu, equalised=False, separable=False, skip_conv=False):
         super(ResBlock, self).__init__()
@@ -144,59 +161,57 @@ class CBR(chainer.Chain):
                 self.c = EqualizedConv2d(ch0, ch1, 7, 1, 3, pad_type='reflect', equalised=equalised, nobias=nobias, separable=separable) 
             elif sample == 'deconv':
                 self.c = EqualizedDeconv2d(ch0, ch1, ksize, 2, pad, equalised=equalised, nobias=nobias, separable=separable)
-            elif sample in ['unpool_res','maxpool_res','avgpool_res']:
-                self.c = EqualizedConv2d(ch0, ch1, ksize, 1, pad, equalised=equalised, nobias=nobias, separable=separable)
-                if self.use_norm:
-                    self.norm0 = get_norm_layer(norm)(ch1)
-                self.cr = EqualizedConv2d(ch1, ch1, ksize, 1, pad, equalised=equalised, nobias=nobias, separable=separable)
+            elif sample == 'pixsh':
+                self.c = PixelShuffler(ch0, ch1, ksize, pad, nobias=nobias)
             else:
                 self.c = EqualizedConv2d(ch0, ch1, ksize, 1, pad, equalised=equalised, nobias=nobias, separable=separable)
             if self.use_norm:
                 self.norm = get_norm_layer(norm)(ch1)
+            if '_res' in sample:
+                if self.use_norm:
+                    self.norm0 = get_norm_layer(norm)(ch1)
+                self.cr = EqualizedConv2d(ch1, ch1, ksize, 1, pad, equalised=equalised, nobias=nobias, separable=separable)
+                self.cskip = EqualizedConv2d(ch0, ch1, 1, 1, 0, equalised=equalised, nobias=nobias)
 
     def __call__(self, x):
-        if self.sample in ['down','none','none-7','deconv']:
-            h = self.c(x)
-        elif self.sample == 'unpool':
-            h = F.unpooling_2d(x, 2, 2, 0, cover_all=False)
-            h = self.c(h)
+        if self.sample in ['maxpool_res','avgpool_res']:
+            h = self.activation(self.norm0(self.c(x)))
+            h = self.norm(self.cr(h))
+            if self.sample == 'maxpool_res':
+                h = F.max_pooling_2d(h, 2, 2, 0)
+                h = h + F.max_pooling_2d(self.cskip(x), 2, 2, 0)
+            elif self.sample == 'avgpool_res':
+                h = F.average_pooling_2d(h, 2, 2, 0)
+                h = h + F.average_pooling_2d(self.cskip(x), 2, 2, 0)                
+        elif self.sample == 'resize':
+            H,W = x.data.shape[2:]
+            h = F.resize_images(x, (2*H,2*W))
+            h = self.norm(self.c(h))
+        elif self.sample == 'resize_res':
+            H,W = x.data.shape[2:]
+            h = F.resize_images(x, (2*H,2*W))
+            h0 = self.activation(self.norm0(self.c(h)))
+            h = self.cskip(h) + self.norm(self.cr(h0))
         elif self.sample == 'unpool_res':
             h = F.unpooling_2d(x, 2, 2, 0, cover_all=False)
-            h0 = self.c(h)
-            if self.use_norm:
-                h = self.norm0(h0)
-            if self.activation is not None:
-                h = self.activation(h)
-            h = h0 + self.cr(h)
-        elif self.sample == 'maxpool':
-            h = self.c(x)
-            h = F.max_pooling_2d(h, 2, 2, 0)
-        elif self.sample == 'maxpool_res':
-            h = self.c(x)
-            if self.use_norm:
-                h = self.norm0(h)
-            if self.activation is not None:
-                h = self.activation(h)
-            h = x+self.cr(h)
-            h = F.max_pooling_2d(h, 2, 2, 0)
-        elif self.sample == 'avgpool':
-            h = self.c(x)
-            h = F.average_pooling_2d(h, 2, 2, 0)
-        elif self.sample == 'avgpool_res':
-            h = self.c(x)
-            if self.use_norm:
-                h = self.norm0(h)
-            if self.activation is not None:
-                h = self.activation(h)
-            h = x+self.cr(h)
-            h = F.average_pooling_2d(h, 2, 2, 0)
+            h0 = self.activation(self.norm0(self.c(h)))
+            h = self.cskip(h) + self.norm(self.cr(h0))
         else:
-            print('unknown sample method %s' % self.sample)
-            exit()
-        if self.use_norm:
-            h = self.norm(h)
-        if self.dropout:
-            h = F.dropout(h, ratio=self.dropout)
+            if self.sample == 'maxpool':
+                h = self.c(x)
+                h = F.max_pooling_2d(h, 2, 2, 0)
+            elif self.sample == 'avgpool':
+                h = self.c(x)
+                h = F.average_pooling_2d(h, 2, 2, 0)
+            elif self.sample == 'unpool':
+                h = F.unpooling_2d(x, 2, 2, 0, cover_all=False)
+                h = self.c(h)
+            else:
+                h = self.c(x)
+            if self.use_norm:
+                h = self.norm(h)
+            if self.dropout:
+                h = F.dropout(h, ratio=self.dropout)
         if self.activation is not None:
             h = self.activation(h)
         return h
@@ -302,6 +317,7 @@ class Generator(chainer.Chain):
         self.n_resblock = args.gen_nblock
         self.chs = args.gen_chs
         self.unet = args.unet
+        self.noise_z = args.noise_z
         self.nfc = args.gen_fc
         with self.init_scope():
             for i in range(args.gen_fc):
@@ -334,6 +350,10 @@ class Generator(chainer.Chain):
         e = h[-1]
         for i in range(self.n_resblock):
             e = getattr(self, 'r' + str(i))(e)
+            if chainer.config.train and self.noise_z>0 and i == self.n_resblock//2:
+                xp = chainer.cuda.get_array_module(e.data)
+                e.data += self.noise_z * xp.random.randn(*e.data.shape, dtype=e.dtype)
+        ## add noise
         for i in range(1,len(self.chs)):
             if self.unet in ['no_last','with_last']:
                 e = getattr(self, 'ua' + str(i))(F.concat([e,h[-1]]))

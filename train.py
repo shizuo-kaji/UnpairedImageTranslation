@@ -61,11 +61,11 @@ def main():
     train_A_dataset = Dataset(
         path=os.path.join(args.root, 'trainA'), baseA=args.HU_base, rangeA=args.HU_range, slice_range=args.slice_range, crop=(args.crop_height,args.crop_width),random=args.random_translate, forceSpacing=0, imgtype=args.imgtype, dtype=args.dtype)
     train_B_dataset = Dataset(
-        path=os.path.join(args.root, 'trainB'),  baseA=args.HU_base, rangeA=args.HU_range, slice_range=args.slice_range, crop=(args.crop_height,args.crop_width), random=args.random_translate, forceSpacing=args.forceSpacing, imgtype=args.imgtype, dtype=args.dtype)
+        path=os.path.join(args.root, 'trainB'),  baseA=args.HU_base, rangeA=args.HU_range, slice_range=args.slice_range, crop=(args.crop_height,args.crop_width), random=args.random_translate, forceSpacing=args.forceSpacing, imgtype=args.imgtype,dtype=args.dtype)
     test_A_dataset = Dataset(
-        path=os.path.join(args.root, 'testA'), baseA=args.HU_base, rangeA=args.HU_range, slice_range=args.slice_range, crop=(args.crop_height,args.crop_width), random=0, forceSpacing=0, imgtype=args.imgtype, dtype=args.dtype)
+        path=os.path.join(args.root, 'testA'), baseA=args.HU_base, rangeA=args.HU_range, slice_range=args.slice_range, crop=(args.crop_height,args.crop_width), random=0, forceSpacing=0, imgtype=args.imgtype,dtype=args.dtype)
     test_B_dataset = Dataset(
-        path=os.path.join(args.root, 'testB'),  baseA=args.HU_base, rangeA=args.HU_range, slice_range=args.slice_range, crop=(args.crop_height,args.crop_width), random=0, forceSpacing=args.forceSpacing, imgtype=args.imgtype, dtype=args.dtype)
+        path=os.path.join(args.root, 'testB'),  baseA=args.HU_base, rangeA=args.HU_range, slice_range=args.slice_range, crop=(args.crop_height,args.crop_width), random=0, forceSpacing=args.forceSpacing, imgtype=args.imgtype,dtype=args.dtype)
 
     args.ch = train_A_dataset.ch
     test_A_iter = chainer.iterators.SerialIterator(test_A_dataset, args.nvis_A, shuffle=False)
@@ -128,7 +128,7 @@ def main():
     opt_f = make_optimizer(gen_f, alpha=args.learning_rate_g)
     opt_y = make_optimizer(dis_y, alpha=args.learning_rate_d)
     opt_x = make_optimizer(dis_x, alpha=args.learning_rate_d)
-#    opt_g.add_hook(chainer.optimizer_hooks.GradientClipping(5))
+#    opt_y.add_hook(chainer.optimizer_hooks.GradientClipping(5))
     optimizers = {'opt_g':opt_g, 'opt_f':opt_f, 'opt_x':opt_x, 'opt_y':opt_y}
     if args.load_optimizer:
         for (m,e) in zip(optimiser_files,optimizers):
@@ -154,8 +154,8 @@ def main():
         params={'args': args}
         )
 
-    if not args.snapinterval:
-        args.snapinterval = (args.lrdecay_start+args.lrdecay_start)//5
+    if args.snapinterval<0:
+        args.snapinterval = args.lrdecay_start+args.lrdecay_period
     log_interval = (200, 'iteration')
     model_save_interval = (args.snapinterval, 'epoch')
     vis_interval = (args.vis_freq, 'iteration')
@@ -174,12 +174,10 @@ def main():
     ## log
     log_keys = ['epoch', 'iteration']
     log_keys_cycle = ['opt_g/loss_cycle_y', 'opt_f/loss_cycle_x','myval/cycle_y_l1','myval/cycle_x_l1',  'opt_g/loss_tv']
-    log_keys.extend(['myval/id_xy_grad','myval/id_xy_l1'])
-    # 'myval/cycle_avgy_l1','myval/id_avgx_l1','myval/id_x_l2','myval/cycle_y_l2'
-    log_keys_d = ['opt_x/loss_real','opt_x/loss_fake','opt_y/loss_real','opt_y/loss_fake','opt_x/loss_gp','opt_y/loss_gp']
+    log_keys_d = ['opt_x/loss_real','opt_x/loss_fake','opt_y/loss_real','opt_y/loss_fake'] # ,'opt_x/loss_gp','opt_y/loss_gp']
     log_keys_adv = ['opt_g/loss_adv','opt_f/loss_adv']
-    log_keys.extend([ 'opt_g/loss_dom', 'opt_f/loss_dom','opt_g/loss_id','opt_f/loss_id','opt_g/loss_idem', 'opt_f/loss_idem'])
-    log_keys.extend([ 'opt_g/loss_grad','opt_f/loss_grad', 'opt_g/loss_air','opt_f/loss_air'])
+    log_keys.extend([ 'opt_g/loss_id','opt_f/loss_id']) # ,'opt_g/loss_idem', 'opt_f/loss_idem','opt_g/loss_dom', 'opt_f/loss_dom',
+    log_keys.extend([ 'opt_g/loss_air','opt_f/loss_air'])   # 'opt_g/loss_grad','opt_f/loss_grad', 
 
     log_keys_all = log_keys+log_keys_d+log_keys_adv+log_keys_cycle
     trainer.extend(extensions.LogReport(keys=log_keys_all, trigger=log_interval))

@@ -56,13 +56,16 @@ def loss_avg_d(diff, ksize=3):
     a = F.average_pooling_2d(diff,ksize,1,0)
     return(F.average(a**2))
 
-def loss_perceptual(x,y,vgg):
+def loss_perceptual(x,y,model):
     with chainer.using_config('train', False) and chainer.function.no_backprop_mode():
         if x.shape[1]==1:
             xp = cuda.get_array_module(x.data)
-            return(F.mean_squared_error(vgg(F.concat([x,x,x]), layers=['pool3'])['pool3'], vgg(F.concat([y,y,y]), layers=['pool3'])['pool3']))
+            vx = model(F.concat([x,x,x]), layers=['pool3'])['pool3']
+            vy = model(F.concat([y,y,y]), layers=['pool3'])['pool3']
         else:
-            return(F.mean_squared_error(vgg(x, layers=['pool3'])['pool3'], vgg(y, layers=['pool3'])['pool3']))
+            vx = model(x, layers=['pool3'])['pool3']
+            vy = model(y, layers=['pool3'])['pool3']
+    return(F.mean_squared_error(vx,vy))
 
 def loss_grad(x, y, norm='l1'):
     xp = cuda.get_array_module(x.data)

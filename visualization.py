@@ -12,7 +12,6 @@ import losses
 
 # assume [0,1] input
 def postprocess(var):
-    xp = chainer.cuda.get_array_module(var.data)
     img = var.data.get()
     img = (img + 1.0) / 2.0  # [0, 1)
     img = img.transpose(0, 2, 3, 1)
@@ -99,14 +98,11 @@ class VisEvaluator(extensions.Evaluator):
         plt.close()
 
         cycle_y_l1 = F.mean_absolute_error(y,y_x_y)
-        cycle_y_l2 = F.mean_squared_error(y,y_x_y)
+#        cycle_y_l2 = F.mean_squared_error(y,y_x_y)
         cycle_x_l1 = F.mean_absolute_error(x,x_y_x)
-        id_xy_grad = losses.loss_grad(x,x_y)
-        id_xy_l1 = F.mean_absolute_error(x,x_y)
+#        id_xy_grad = losses.loss_grad(x,x_y)
 
-        result = {"myval/cycle_y_l1":cycle_y_l1, "myval/cycle_y_l2":cycle_y_l2, "myval/cycle_x_l1":cycle_x_l1, 
-            "myval/id_xy_grad":id_xy_grad,
-            "myval/id_xy_l1":id_xy_l1}
+        result = {"myval/cycle_y_l1":cycle_y_l1, "myval/cycle_x_l1":cycle_x_l1}
         return result
 
 ## obsolete

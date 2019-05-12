@@ -162,8 +162,8 @@ def main():
             'args': args
         })
 
-    if not args.snapinterval:
-        args.snapinterval = (args.lrdecay_start+args.lrdecay_start)//5
+    if args.snapinterval<0:
+        args.snapinterval = args.lrdecay_start+args.lrdecay_period
     log_interval = (200, 'iteration')
     model_save_interval = (args.snapinterval, 'epoch')
     vis_interval = (args.vis_freq, 'iteration')
@@ -183,7 +183,7 @@ def main():
     log_keys_cycle = ['opt_enc_x/loss_cycle', 'opt_enc_y/loss_cycle', 'opt_dec_x/loss_cycle',  'opt_dec_y/loss_cycle', 'myval/cycle_y_l1']
     log_keys_d = ['opt_x/loss_real','opt_x/loss_fake','opt_y/loss_real','opt_y/loss_fake','opt_z/loss_x','opt_z/loss_y']
     log_keys_adv = ['opt_enc_y/loss_adv','opt_dec_y/loss_adv','opt_enc_x/loss_adv','opt_dec_x/loss_adv']
-    log_keys.extend([ 'opt_dec_y/loss_id', 'opt_enc_x/loss_dom','opt_enc_y/loss_dom', 'opt_dec_y/loss_grad','opt_dec_x/loss_grad'])
+    log_keys.extend([ 'opt_dec_y/loss_id'])
     log_keys.extend([ 'opt_enc_x/loss_reg','opt_enc_y/loss_reg', 'opt_dec_x/loss_air','opt_dec_y/loss_air', 'opt_dec_y/loss_tv'])
     log_keys_d.extend(['opt_x/loss_gp','opt_y/loss_gp'])
 

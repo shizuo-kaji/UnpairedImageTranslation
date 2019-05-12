@@ -21,13 +21,12 @@ class DatasetOutMem(dataset_mixin.DatasetMixin):
         self.crop = crop
         self.color=True
         self.ch = 3 if self.color else 1
-        self.width = crop[1]
-        self.height = crop[0]
         self.imgtype=imgtype
+        self.dtype = dtype
         for file in glob.glob(self.path+"/**/*.{}".format(imgtype), recursive=True):
             fn, ext = os.path.splitext(file)
             self.ids.append(fn)
-        print("Loaded: {}".format(len(self.ids)))
+        print("Loaded: {} images".format(len(self.ids)))
 
     def __len__(self):
         return len(self.ids)
@@ -45,7 +44,7 @@ class DatasetOutMem(dataset_mixin.DatasetMixin):
         img = random_crop(img, self.crop)
         if self.flip:
             img = random_flip(img, x_random=True)
-        return img
+        return img.astype(self.dtype)
 
 ## load dataset onto memory: faster
 class Dataset(dataset_mixin.DatasetMixin):

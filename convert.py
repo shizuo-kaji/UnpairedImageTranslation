@@ -51,7 +51,7 @@ if __name__ == '__main__':
             for x in ['imgtype','crop_width','crop_height','HU_base','HU_range','forceSpacing',
               'dis_norm','dis_activation','dis_basech','dis_ksize','dis_sample','dis_down','dis_ndown',
               'gen_norm','gen_activation','gen_out_activation','gen_nblock','gen_chs','gen_sample','gen_down','gen_up','gen_ksize','unet',
-              'conditional_discriminator','eqconv','wgan','dtype']:
+              'conditional_discriminator','gen_fc','gen_fc_activation','spconv','eqconv','wgan','dtype']:
                 if x in larg:
                     setattr(args, x, larg[x])
             if not args.load_models:
@@ -65,6 +65,7 @@ if __name__ == '__main__':
     args.dis_activation = activation[args.dis_activation]
     args.gen_activation = activation[args.gen_activation]
     args.gen_out_activation = activation[args.gen_out_activation]
+    args.gen_fc_activation = activation[args.gen_fc_activation]
     print(args)
     # Enable autotuner of cuDNN
     chainer.config.autotune = True
@@ -141,7 +142,7 @@ if __name__ == '__main__':
     prevdir = "RaNdOmDir"
     for batch in iterator:
         imgs = Variable(chainer.dataset.concat_examples(batch, device=args.gpu))
-        with chainer.using_config('train', False):
+        with chainer.using_config('train', False),chainer.function.no_backprop_mode():
             if is_AE:
                 out_v = dec(enc(imgs))
             else:
@@ -205,7 +206,7 @@ if __name__ == '__main__':
             else:
                 cc=1
                 ch,cw = new.shape
-            h,w = (dataset.height, dataset.width)
+            h,w = dataset.crop
 
             # converted image
             if args.imgtype=="dcm":
