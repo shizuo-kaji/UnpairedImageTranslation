@@ -22,8 +22,7 @@ class ImagePool():
                 self.images.append(image)
                 return_images.append(image)
             else:
-                p = random.uniform(0, 1)
-                if p > 0.5:
+                if random.choice([True, False]):
                     random_id = random.randint(0, self.pool_size - 1)
                     tmp = xp.copy(self.images[random_id])
                     self.images[random_id] = image

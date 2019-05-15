@@ -100,7 +100,7 @@ class Updater(chainer.training.StandardUpdater):
         if self.args.lambda_idempotence > 0:             
             loss_idem_x = F.mean_absolute_error(y_x,self.gen_f(y_x))
             loss_idem_y = F.mean_absolute_error(x_y,self.gen_g(x_y))
-            loss_gen += self.args.lambda_idempotence * (loss_idem_x + loss_idem_y)
+            loss_gen = loss_gen + self.args.lambda_idempotence * (loss_idem_x + loss_idem_y)
             if self.report_start<self._iter:
                 chainer.report({'loss_idem': loss_idem_x}, self.gen_f) 
                 chainer.report({'loss_idem': loss_idem_y}, self.gen_g)            
@@ -129,8 +129,10 @@ class Updater(chainer.training.StandardUpdater):
 
         ## warm-up
         if self._iter < self.args.warmup:
-            loss_gen += losses.loss_avg(y,y_x, ksize=self.args.id_ksize, norm='l2')
-            loss_gen += losses.loss_avg(x,x_y, ksize=self.args.id_ksize, norm='l2')
+            loss_gen = loss_gen + F.mean_squared_error(x,self.gen_f(x))
+            loss_gen = loss_gen + F.mean_squared_error(y,self.gen_g(y))
+#            loss_gen = loss_gen + losses.loss_avg(y,y_x, ksize=self.args.id_ksize, norm='l2')
+#            loss_gen = loss_gen + losses.loss_avg(x,x_y, ksize=self.args.id_ksize, norm='l2')
 
         ## background should be preserved 
         if self.args.lambda_air > 0:

@@ -12,7 +12,7 @@ def arguments():
     parser.add_argument('--out', '-o', default='result',
                         help='Directory to output the result')
     parser.add_argument('--argfile', '-a', help="specify args file to read")
-    parser.add_argument('--imgtype', '-t', default="jpg", help="image file type (file extension)")
+    parser.add_argument('--imgtype', '-it', default="jpg", help="image file type (file extension)")
 
     parser.add_argument('--learning_rate', '-lr', type=float, default=None,
                         help='Learning rate')
@@ -113,7 +113,7 @@ def arguments():
     parser.add_argument('--gen_dropout', '-gdo', type=float, default=None, 
                         help='dropout ratio for generator')
     parser.add_argument('--gen_norm', '-gn', default='instance',
-                        choices=['instance', 'instance_aff','batch','batch_aff', 'rbatch', 'fnorm', 'none'])
+                        choices=['instance','batch','batch_aff', 'rbatch', 'fnorm', 'none'])
     parser.add_argument('--unet', '-u', default='with_last', choices=['none','no_last','with_last'],
                         help='use u-net for generator')
     parser.add_argument('--gen_start', type=int, default=200,

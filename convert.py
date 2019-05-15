@@ -48,7 +48,7 @@ if __name__ == '__main__':
         with open(args.argfile, 'r') as f:
             larg = json.load(f)
             root=os.path.dirname(args.argfile)
-            for x in ['imgtype','crop_width','crop_height','HU_base','HU_range','forceSpacing',
+            for x in ['HU_base','HU_range','forceSpacing',
               'dis_norm','dis_activation','dis_basech','dis_ksize','dis_sample','dis_down','dis_ndown',
               'gen_norm','gen_activation','gen_out_activation','gen_nblock','gen_chs','gen_sample','gen_down','gen_up','gen_ksize','unet',
               'conditional_discriminator','gen_fc','gen_fc_activation','spconv','eqconv','wgan','dtype']:
@@ -60,6 +60,7 @@ if __name__ == '__main__':
                 else:
                     args.load_models=os.path.join(root,'gen_g{}.npz'.format(larg["lrdecay_start"]+larg["lrdecay_period"]))
                     
+    args.random_translate = 0
     save_args(args, outdir)
     args.dtype = dtypes[args.dtype]
     args.dis_activation = activation[args.dis_activation]

@@ -23,7 +23,7 @@ class DatasetOutMem(dataset_mixin.DatasetMixin):
         self.ch = 3 if self.color else 1
         self.imgtype=imgtype
         self.dtype = dtype
-        for file in glob.glob(self.path+"/**/*.{}".format(imgtype), recursive=True):
+        for file in glob.glob(os.path.join(self.path,"**/*.{}".format(imgtype)), recursive=True):
             fn, ext = os.path.splitext(file)
             self.ids.append(fn)
         print("Loaded: {} images".format(len(self.ids)))
