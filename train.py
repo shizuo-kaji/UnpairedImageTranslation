@@ -13,7 +13,7 @@ import chainer
 from chainer import serializers
 from chainer import training
 from chainer.training import extensions
-from chainerui.extensions import CommandsExtension
+#from chainerui.extensions import CommandsExtension
 from chainerui.utils import save_args
 from chainer.dataset import convert
 import chainer.functions as F
@@ -150,7 +150,7 @@ def main():
         },
         optimizer=optimizers,
         device=args.gpu[0],
-        converter=convert.ConcatWithAsyncTransfer(),
+#        converter=convert.ConcatWithAsyncTransfer(),
         params={'args': args}
         )
 
@@ -188,7 +188,7 @@ def main():
 #    trainer.extend(extensions.dump_graph('opt_x/loss_real', out_name='dis.dot'))
 
     # ChainerUI
-    trainer.extend(CommandsExtension())
+#    trainer.extend(CommandsExtension())
 
     if extensions.PlotReport.available():
         trainer.extend(extensions.PlotReport(log_keys[2:], 'iteration', trigger=plot_interval, file_name='loss.png'))

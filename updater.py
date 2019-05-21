@@ -57,7 +57,7 @@ class Updater(chainer.training.StandardUpdater):
         else:
             x_y_copy = Variable(self._buffer_y.query(x_y.data))
         x_y_x = self.gen_f(x_y)
-        loss_cycle_x = losses.loss_avg(x_y_x, x, ksize=self.args.cycle_ksize, norm='l1')
+        loss_cycle_x = F.mean_absolute_error(x_y_x, x)
 
         loss_gen_g_adv = 0
         if self.args.gen_start<self._iter:
@@ -80,7 +80,7 @@ class Updater(chainer.training.StandardUpdater):
         else:
             y_x_copy = Variable(self._buffer_x.query(y_x.data))
         y_x_y = self.gen_g(y_x)
-        loss_cycle_y = losses.loss_avg(y_x_y, y, ksize=self.args.cycle_ksize, norm='l1')
+        loss_cycle_y = F.mean_absolute_error(y_x_y, y)
         if self.args.gen_start<self._iter:
             if self.args.conditional_discriminator:
                 if self.args.wgan:
@@ -153,7 +153,7 @@ class Updater(chainer.training.StandardUpdater):
                 chainer.report({'loss_grad': loss_grad_y}, self.gen_f)
         ## total variation
         if self.args.lambda_tv > 0:
-            loss_tv = losses.total_variation(x_y, self.args.tv_tau)
+            loss_tv = losses.total_variation2(x_y, self.args.tv_tau)
             loss_gen = loss_gen + self.args.lambda_tv * loss_tv
             if self.report_start<self._iter:
                 chainer.report({'loss_tv': loss_tv}, self.gen_g)

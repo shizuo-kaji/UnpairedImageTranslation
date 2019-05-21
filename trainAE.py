@@ -11,7 +11,7 @@ matplotlib.use('Agg')
 import chainer
 from chainer import serializers, training
 from chainer.training import extensions
-from chainerui.extensions import CommandsExtension
+#from chainerui.extensions import CommandsExtension
 from chainerui.utils import save_args
 from chainer.dataset import convert
 import chainer.functions as F
@@ -156,7 +156,7 @@ def main():
             'train_B': train_B_iter,
         },
         optimizer=optimizers,
-        converter=convert.ConcatWithAsyncTransfer(),
+#        converter=convert.ConcatWithAsyncTransfer(),
         device=args.gpu[0],
         params={
             'args': args
@@ -191,7 +191,10 @@ def main():
     trainer.extend(extensions.LogReport(keys=log_keys_all, trigger=log_interval))
     trainer.extend(extensions.PrintReport(log_keys_all), trigger=log_interval)
     trainer.extend(extensions.ProgressBar(update_interval=20))
-    trainer.extend(CommandsExtension())
+
+    # ChainerUI
+#    trainer.extend(CommandsExtension())
+
     ## to dump graph, set -lix 1 --warmup 0
 #    trainer.extend(extensions.dump_graph('opt_g/loss_id', out_name='gen.dot'))
 #    trainer.extend(extensions.dump_graph('opt_x/loss', out_name='dis.dot'))

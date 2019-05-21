@@ -49,7 +49,7 @@ if __name__ == '__main__':
             larg = json.load(f)
             root=os.path.dirname(args.argfile)
             for x in ['HU_base','HU_range','forceSpacing',
-              'dis_norm','dis_activation','dis_basech','dis_ksize','dis_sample','dis_down','dis_ndown',
+              'dis_norm','dis_activation','dis_chs','dis_ksize','dis_sample','dis_down',
               'gen_norm','gen_activation','gen_out_activation','gen_nblock','gen_chs','gen_sample','gen_down','gen_up','gen_ksize','unet',
               'conditional_discriminator','gen_fc','gen_fc_activation','spconv','eqconv','wgan','dtype']:
                 if x in larg:

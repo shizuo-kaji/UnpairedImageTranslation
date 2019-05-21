@@ -83,7 +83,7 @@ class Updater(chainer.training.StandardUpdater):
         x_z_clean = x_z[-1].data.copy()
         x_z[-1] = losses.add_noise(x_z[-1], sigma=self.args.noise_z)
         x_x = self.dec_x(x_z)
-        loss_cycle_xzx = losses.loss_avg(x_x, x, ksize=self.args.cycle_ksize, norm='l1')
+        loss_cycle_xzx = F.mean_absolute_error(x_x, x)
         if self.report_start<self._iter:
             chainer.report({'loss_cycle': loss_cycle_xzx}, self.enc_x)
 
@@ -91,7 +91,7 @@ class Updater(chainer.training.StandardUpdater):
         y_z_clean = y_z[-1].data.copy()
         y_z[-1] = losses.add_noise(y_z[-1], sigma=self.args.noise_z)
         y_y = self.dec_y(y_z)
-        loss_cycle_yzy = losses.loss_avg(y_y, y, ksize=self.args.cycle_ksize, norm='l1')
+        loss_cycle_yzy = F.mean_absolute_error(y_y, y)
         if self.report_start<self._iter:
             chainer.report({'loss_cycle': loss_cycle_yzy}, self.enc_y)
 
@@ -169,7 +169,7 @@ class Updater(chainer.training.StandardUpdater):
                 chainer.report({'loss_grad': loss_grad_x}, self.dec_y)
                 chainer.report({'loss_grad': loss_grad_y}, self.dec_x)
         if self.args.lambda_tv > 0:
-            loss_tv = losses.total_variation(x_y, self.args.tv_tau)
+            loss_tv = losses.total_variation2(x_y, self.args.tv_tau)
             loss_gen = loss_gen + self.args.lambda_tv * loss_tv
             if self.report_start<self._iter:
                 chainer.report({'loss_tv': loss_tv}, self.dec_y)

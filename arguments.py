@@ -70,12 +70,14 @@ def arguments():
 
     # discriminator
     parser.add_argument('--dis_activation', '-da', default='lrelu', choices=activation.keys())
+    parser.add_argument('--dis_chs', '-dc', type=int, nargs="*", default=None,
+                        help='Number of channels in down layers in discriminator')
     parser.add_argument('--dis_basech', '-db', type=int, default=64,
-                        help='the base number of channels in discriminator')
-    parser.add_argument('--dis_ksize', '-dk', type=int, default=4,
-                        help='kernel size for patchGAN discriminator')
+                        help='the base number of channels in discriminator (doubled in each down-layer)')
     parser.add_argument('--dis_ndown', '-dl', type=int, default=3,
                         help='number of down layers in discriminator')
+    parser.add_argument('--dis_ksize', '-dk', type=int, default=4,
+                        help='kernel size for patchGAN discriminator')
     parser.add_argument('--dis_down', '-dd', default='down', choices=['down','maxpool','maxpool_res','avgpool','avgpool_res','none'],  ## default down
                         help='type of down layers in discriminator')
     parser.add_argument('--dis_sample', '-ds', default='down', 
@@ -96,8 +98,12 @@ def arguments():
     parser.add_argument('--gen_activation', '-ga', default='relu', choices=activation.keys())
     parser.add_argument('--gen_out_activation', '-go', default='tanh', choices=activation.keys())
     parser.add_argument('--gen_fc_activation', '-gfca', default='relu', choices=activation.keys())
-    parser.add_argument('--gen_chs', '-gc', type=int, nargs="*", default=[32,64,128],
-                        help='Number of channels in down layers in generator; the first entry should coincide with the number of channels in the input images')
+    parser.add_argument('--gen_chs', '-gc', type=int, nargs="*", default=None,
+                        help='Number of channels in down layers in generator')
+    parser.add_argument('--gen_ndown', '-gl', type=int, default=3,
+                        help='number of down layers in generator')
+    parser.add_argument('--gen_basech', '-gb', type=int, default=32,
+                        help='the base number of channels in generator (doubled in each down-layer)')
     parser.add_argument('--gen_fc', '-gfc', type=int, default=0,
                         help='number of fc layers before convolutional layers')
     parser.add_argument('--gen_nblock', '-nb', type=int, default=9,
@@ -125,8 +131,6 @@ def arguments():
                         help='weight for cycle loss FG=Id:A -> B -> A')
     parser.add_argument('--lambda_B', '-lcB', type=float, default=10.0,
                         help='weight for cycle loss GF=Id:B -> A -> B')
-    parser.add_argument('--cycle_ksize', '-ck', type=int, default=0,
-                        help='kernel size for cycle consistency')
     parser.add_argument('--lambda_identity_x', '-lix', type=float, default=0,
                         help='lambda for perceptual loss for A -> B')
     parser.add_argument('--lambda_identity_y', '-liy', type=float, default=0,
@@ -182,6 +186,9 @@ def arguments():
     if args.learning_rate:
         args.learning_rate_g = args.learning_rate
         args.learning_rate_d = args.learning_rate
-
+    if not args.gen_chs:
+        args.gen_chs = [int(args.gen_basech) * (i+1) for i in range(args.gen_ndown)]
+    if not args.dis_chs:
+        args.dis_chs = [int(args.dis_basech) * (i+1) for i in range(args.dis_ndown)]
     return(args)
 

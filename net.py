@@ -373,32 +373,30 @@ class Generator(chainer.Chain):
 class Discriminator(chainer.Chain):
     def __init__(self, args):
         super(Discriminator, self).__init__()
-        base = args.dis_basech
         self.n_down_layers = args.dis_ndown
         self.activation = args.dis_activation
         self.wgan = args.wgan
+        self.chs = args.dis_chs
 
         with self.init_scope():
-            self.c0 = CBR(None, base, ksize=args.dis_ksize, norm='none', 
+            self.c0 = CBR(None, self.chs[0], ksize=args.dis_ksize, norm='none', 
                           sample=args.dis_sample, activation=args.dis_activation,
                           dropout=args.dis_dropout, equalised=args.eqconv) #separable=args.spconv)
 
-            for i in range(1, self.n_down_layers):
+            for i in range(1, len(self.chs)):
                 setattr(self, 'c' + str(i),
-                        CBR(base, base * 2, ksize=args.dis_ksize, norm=args.dis_norm,
+                        CBR(self.chs[i-1], self.chs[i], ksize=args.dis_ksize, norm=args.dis_norm,
                             sample=args.dis_down, activation=args.dis_activation, dropout=args.dis_dropout, equalised=args.eqconv, separable=args.spconv))
-                base *= 2
 
-            self.csl = CBR(base, base * 2, ksize=args.dis_ksize, norm=args.dis_norm, sample='none', activation=args.dis_activation, dropout=args.dis_dropout, equalised=args.eqconv, separable=args.spconv)
+            self.csl = CBR(self.chs[-1], 2*self.chs[-1], ksize=args.dis_ksize, norm=args.dis_norm, sample='none', activation=args.dis_activation, dropout=args.dis_dropout, equalised=args.eqconv, separable=args.spconv)
             if self.wgan:
                 self.fc = L.Linear(None, 1)
             else:
-                base *= 2
-                self.cl = CBR(base, 1, ksize=args.dis_ksize, norm='none', sample='none', activation=None, dropout=False, equalised=args.eqconv, separable=args.spconv)
+                self.cl = CBR(2*self.chs[-1], 1, ksize=args.dis_ksize, norm='none', sample='none', activation=None, dropout=False, equalised=args.eqconv, separable=args.spconv)
 
     def __call__(self, x):
         h = self.c0(x)
-        for i in range(1, self.n_down_layers):
+        for i in range(1, len(self.chs)):
             h = getattr(self, 'c' + str(i))(h)
         h = self.csl(h)
         if self.wgan:

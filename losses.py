@@ -118,12 +118,8 @@ def total_variation(x,tau=1e-6):
     d = F.sqrt(dx**2 + dy**2 + xp.full(dx.data.shape, tau**2, dtype=dx.dtype))
     return(F.average(d))
 
-def total_variation2(x):
+def total_variation2(x,tau=None):
     xp = cuda.get_array_module(x.data)
-    wh = xp.asarray([[[[1],[-1]]]], dtype=x.dtype)
-    ww = xp.asarray([[[[1, -1]]]], dtype=x.dtype)
-    dx = F.convolution_2d(x, W=wh)
-    dy = F.convolution_2d(x, W=ww)
-#    dx = x[:, 1:, :, :] - x[:, :-1, :, :]
-#    dy = x[:, :, 1:, :] - x[:, :, :-1, :]
+    dx = x[:, :, 1:, :] - x[:, :, :-1, :]
+    dy = x[:, :, :, 1:] - x[:, :, :, :-1]
     return F.average(F.absolute(dx))+F.average(F.absolute(dy))
