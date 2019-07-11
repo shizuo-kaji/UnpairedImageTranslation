@@ -55,16 +55,23 @@ def loss_avg_d(diff, ksize=3):
     a = F.average_pooling_2d(diff,ksize,1,0)
     return(F.average(a**2))
 
-def loss_perceptual(x,y,model):
-    with chainer.using_config('train', False) and chainer.function.no_backprop_mode():
-        if x.shape[1]==1:
-            xp = cuda.get_array_module(x.data)
-            vx = model(F.concat([x,x,x]), layers=['pool3'])['pool3']
-            vy = model(F.concat([y,y,y]), layers=['pool3'])['pool3']
+def loss_perceptual(x,y,model,layer='conv4_2',grey=False):
+    with chainer.using_config('train', False):
+        if grey:
+            loss = 0
+            for i in range(x.shape[1]):
+                xp = cuda.get_array_module(x.data)
+                xx=x[:,i:(i+1),:,:]
+                vx = model(F.concat([xx,xx,xx]), layers=[layer])[layer]
+                yy=y[:,i:(i+1),:,:]
+                vy = model(F.concat([yy,yy,yy]), layers=[layer])[layer]
+                loss += F.mean_squared_error(vx,vy)
+            loss /= x.shape[1]
         else:
-            vx = model(x, layers=['pool3'])['pool3']
-            vy = model(y, layers=['pool3'])['pool3']
-    return(F.mean_squared_error(vx,vy))
+            vx = model(x, layers=[layer])[layer]
+            vy = model(y, layers=[layer])[layer]
+            loss = F.mean_squared_error(vx,vy)
+    return(loss)
 
 def loss_grad(x, y, norm='l1'):
     xp = cuda.get_array_module(x.data)
@@ -83,25 +90,29 @@ def loss_grad_d(diff):
     grad = xp.tile(xp.asarray([[[[1,0,-1],[2,0,-2],[1,0,-1]]]],dtype=diff.dtype),(diff.data.shape[1],1,1))
     dx = F.convolution_2d(diff,grad)
     dy = F.convolution_2d(diff,xp.transpose(grad,(0,1,3,2)))
-#        target = self.xp.zeros_like(dx.data)
-#        return 0.5*(F.mean_squared_error(dx,target)+F.mean_squared_error(dy,target))
     return F.average(dx**2) + F.average(dy**2)
 
-## align air
-def loss_range_comp(x,y,cutoff,norm='l1'):
-    # compare only pixels with -x > cutoff
+# compare only pixels with x < threshold. Note x is fixed and y is variable
+def loss_comp_low(x,y,threshold,norm='l1'):
     if norm=='l1':
-        return(F.sum(F.absolute(F.relu(-x-cutoff)-F.relu(-y-cutoff))))
+        return(F.average( ( (x.array<threshold)+(y.array<threshold) ) * F.absolute(x-y)))
     else:
-        return(F.sum((F.relu(-x-cutoff)-F.relu(-y-cutoff))**2))
+        return(F.average( ( (x.array<threshold)+(y.array<threshold) ) * ((x-y)**2) ))
 
 def loss_func_comp(y, val, noise=0):
     xp = cuda.get_array_module(y.data)
     if noise>0:
         val += random.normalvariate(0,noise)   ## jitter for the target value
 #        val += random.uniform(-noise, noise)   ## jitter for the target value
-    target = xp.full(y.data.shape, val, dtype=y.dtype)
-    return F.mean_squared_error(y, target)
+    shape = y.data.shape
+    if y.shape[1] == 2:  ## weighted discriminator
+        shape = (shape[0],1,shape[2],shape[3])
+        target = xp.full(shape, val, dtype=y.dtype)
+        W = F.tanh(y[:,1,:,:])+1
+        return F.average( ((y[:,0,:,:]-target)**2) * W )  ## weighted loss
+    else:
+        target = xp.full(shape, val, dtype=y.dtype)
+        return F.mean_squared_error(y, target)
 
 def loss_func_reg(y,norm='l1'):
     if norm=='l1':
@@ -109,17 +120,27 @@ def loss_func_reg(y,norm='l1'):
     else:
         return(F.average(y**2))
 
-def total_variation(x,tau=1e-6):
+def total_variation(x,tau=1e-6, method="abs"):
     xp = cuda.get_array_module(x.data)
-    wh = xp.tile(xp.asarray([[[[1,0],[-1,0]]]], dtype=x.dtype),(x.data.shape[1],1,1))
-    ww = xp.tile(xp.asarray([[[[1, -1],[0, 0]]]], dtype=x.dtype),(x.data.shape[1],1,1))
-    dx = F.convolution_2d(x, W=wh)
-    dy = F.convolution_2d(x, W=ww)
-    d = F.sqrt(dx**2 + dy**2 + xp.full(dx.data.shape, tau**2, dtype=dx.dtype))
-    return(F.average(d))
+    if method=="abs":
+        dx = x[:, :, 1:, :] - x[:, :, :-1, :]
+        dy = x[:, :, :, 1:] - x[:, :, :, :-1]
+        return F.average(F.absolute(dx))+F.average(F.absolute(dy))
+    elif method=="sobel":
+        wh = xp.tile(xp.asarray([[[[1,0],[-1,0]]]], dtype=x.dtype),(x.data.shape[1],1,1))
+        ww = xp.tile(xp.asarray([[[[1, -1],[0, 0]]]], dtype=x.dtype),(x.data.shape[1],1,1))
+        dx = F.convolution_2d(x, W=wh)
+        dy = F.convolution_2d(x, W=ww)
+        d = F.sqrt(dx**2 + dy**2 + xp.full(dx.data.shape, tau**2, dtype=dx.dtype))
+        return(F.average(d))
+    elif method=="usual":
+        xp = cuda.get_array_module(x.data)
+        dx = x[:, :, 1:, :-1] - x[:, :, :-1, :-1]
+        dy = x[:, :, :-1, 1:] - x[:, :, :-1, :-1]
+        d = F.sqrt(dx**2 + dy**2 + xp.full(dx.data.shape, tau**2, dtype=dx.dtype))
+        return(F.average(d))
 
-def total_variation2(x,tau=None):
+def total_variation_ch(x):
     xp = cuda.get_array_module(x.data)
-    dx = x[:, :, 1:, :] - x[:, :, :-1, :]
-    dy = x[:, :, :, 1:] - x[:, :, :, :-1]
-    return F.average(F.absolute(dx))+F.average(F.absolute(dy))
+    dx = x[:, 1:, :, :] - x[:, :-1, :, :]
+    return F.average(F.absolute(dx))

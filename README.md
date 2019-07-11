@@ -17,7 +17,7 @@ MIT Licence
 ### Requirements
 - a modern GPU
 - python 3: [Anaconda](https://anaconda.org) is recommended
-- chainer >= 5.3.0, cupy, chainerui, chainercv: install them by
+- chainer >= 6.1.0, cupy, chainerui, chainercv: install them by
 ```
 pip install cupy,chainer,chainerui,chainercv
 ```
@@ -25,30 +25,30 @@ pip install cupy,chainer,chainerui,chainercv
 
 ### Training
 - Some demo datasets are available at https://people.eecs.berkeley.edu/~taesung_park/CycleGAN/datasets/
-- Training data preparation:
-Under the directory named images, place four directories
+- Training data preparation: Under the directory named images, place four directories
 "trainA","trainB","testA","testB"
-- We train two neural networks G and F (generators) together with two auxiliary networks (discriminators).
-- G takes images in domain A (placed under "trainA") and converts them to images in domain B. F goes in the opposite way.
-- Images under "testA" and "testB" are used for validation
+- We train four neural networks enc_x, enc_y, dec_x, and dec_y (generators) together with two or three networks (discriminators).
+- enc_x takes an image X in domain A (placed under "trainA") and converts it to a latent representation Z.
+Then, dec_y takes Z and converts it to an image in domain B. enc_y and dec_x go in the opposite way.
+- Images under "testA" and "testB" are used for validation (visualisation produced during training).
 - A typical training is done by
 ```
-python train.py -R images -it jpg -cw 256 -ch 256 -o results -gc 64 128 256 -gd maxpool -gu resize -lix 1.0 -liy 1.0 -ltv 1e-3 -ld 1.0 -n 0.03 -nz 0.03 -e 50
+python train.py -R images -it jpg -cw 256 -ch 256 -o results -gc 64 128 256 -gd maxpool -gu resize -lix 1.0 -liy 1.0 -ltv 1e-3 -lreg 0.1 -lz 1 -n 0.03 -nz 0.03 -e 50
 ```
 The jpg (-it jpg) files under "images/trainA/" and "images/trainB/" are cropped to 256 x 256 (-cw 256 -ch 256)
-and fed in to neural networks.
-Crop size may have to be a power of two, if you encounter any error regarding the "shape of array".
+and fed to the neural networks.
+Crop size may have to be divisible by a large power of two (such as 8,16), if you encounter any error regarding the "shape of array".
 
 The generators downsampling layers consists of 64,128,256 channels (-gc 64 128 256) with convolution and maxpooling (-gd maxpool)
 and upsampling layers use bilinear interpolation (-gu resize) followed by a convolution.
-The generator's loss consists of the perceptual loss comparing x and G(x) (-lix 1.0) and that comparing y and F(y) (-liy 1.0),
-and total variation (-ltv 1e-3) and the domain preservation which is the L2 error comparing x and F(x) and y and G(y) (-ld 1.0).
+The generator's loss consists of the perceptual loss comparing X and dec_y(enc_x(x)) (-lix 1.0) and that comparing Y and dec_x(enc_y(y)) (-liy 1.0),
+and total variation (-ltv 1e-3).
+The latent representations Z are regularised by a third discriminator (-lz 1) and by the Euclidean norm (-lreg 0.1).
 Gaussian noise is injected before conversion (-n 0.03) and also in the latent bottleneck layer (-nz 0.03).
 
 The training lasts for 50 epochs (-e 50).
-You will obtain learnt model files "gen_g??.npz" and "gen_f??.npz" under the directory "results" (-o results).
-Also, it occasionally produces image files under "results/vis" containing
-rows with A G(A) F(G(A)) and B F(B) G(F(B)).
+Learned model files "gen_g??.npz" and "gen_f??.npz" will appear under the directory "results" (-o results).
+During training, it occasionally produces image files under "results/vis" containing original, converted, cyclically converted images in each row. 
 - A brief description of other command-line arguments is given by
 ```
 python train.py -h
@@ -57,15 +57,8 @@ Note that adding a lot of different losses may cause memory shortage.
 
 ### Conversion
 ```
-python convert.py -a results/args -it jpg -R input_dir -o output_dir -b 10 -m gen_g50.npz
+python convert.py -a results/args -it jpg -R input_dir -o output_dir -b 10 -m enc_x50.npz
 ```
-searches for jpg files recursively under input_dir and outputs converted images by the generator G to output_dir.
-If you specify -m gen_f50.npz instead, you get converted images by the generator F.
-A larger batch size (-b 10) increases the conversion speed but may consume too much memory.
-
-### Another version
-A version based on a shared latent space model is also included.
-A typical training goes similarly with
-```
-python trainAE.py -cw 256 -ch 256 -R images -it jpg -o results -lreg 0.03 -n 0.03 -nz 0.03 -lz 1 -lix 1 -liy 1
-```
+searches for jpg files recursively under input_dir and outputs converted images by the generator dec_y(enc_x(X)) to output_dir.
+If you specify -m enc_y50.npz instead, you get converted images in the opposite way.
+A larger batch size (-b 10) increases the conversion speed but may consume too much GPU memory.

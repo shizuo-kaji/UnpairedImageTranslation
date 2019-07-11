@@ -8,41 +8,72 @@ import numpy as np
 from skimage.transform import rescale
 from scipy.misc import imresize
 from chainercv.transforms import random_crop,center_crop
+from consts import dtypes
 
-## load images everytime from disk: slower but low memory usage
-class DatasetOutMem(dataset_mixin.DatasetMixin):
-    def __init__(self, path, baseA, rangeA, slice_range=None, crop=(256,256), random=0, forceSpacing=0.7634, imgtype="dcm", dtype=np.float32):
+class Dataset(dataset_mixin.DatasetMixin):
+    def __init__(self, path, args, random=0, forceSpacing=0):
         self.path = path
-        self.base = baseA
-        self.range = rangeA
-        self.ids = []
+        self.base = args.HU_base
+        self.range = args.HU_range
         self.random = random
-        self.crop = crop
-        self.ch = 1
+        self.crop = (args.crop_height,args.crop_width)
+        self.ch = args.num_slices
         self.forceSpacing = forceSpacing
-        self.dtype = dtype
-        self.imgtype=imgtype
+        self.dtype = dtypes[args.dtype]
+        self.imgtype=args.imgtype
+        self.dcms = []
+        self.names = []
+        self.idx = [] 
 
+        if not args.crop_height:
+            self.crop = (384,480)  ## default for the CBCT dataset
         print("Load Dataset from disk: {}".format(path))
-        for file in glob.glob(os.path.join(self.path,"**/*.{}".format(imgtype)), recursive=True):
-            fn, ext = os.path.splitext(file)
-            if slice_range:
-                # slice location from dicom header: slow
-#                ref_dicom = dicom.read_file(file, force=True)
-#                loc = float(ref_dicom.SliceLocation)
-                # slice location from filename
-                loc = int(fn[-3:])
-                if slice_range[0] < loc < slice_range[1]:
-                    self.ids.append(fn)
-            else:
-                self.ids.append(fn)
-        print("Loaded: {} images".format(len(self.ids)))
+        dirlist = [path]
+        for f in os.listdir(path):
+            if os.path.isdir(os.path.join(path, f)):
+                dirlist.append(os.path.join(path,f))
+        skipcount = 0
+        j = 0
+        for dirname in sorted(dirlist):
+            files = [os.path.join(dirname, fname) for fname in sorted(os.listdir(dirname)) if fname.endswith(args.imgtype)]
+            slices = []
+            filenames = []
+            loc = []
+            for f in files:
+                ds = dicom.dcmread(f, force=True)
+                ds.file_meta.TransferSyntaxUID = dicom.uid.ImplicitVRLittleEndian
+                if hasattr(ds, 'SliceLocation'):
+                    # loc.append(float(ds.SliceLocation))
+                    loc.append(int(f[-7:-4])) # slice location from filename
+                    if args.slice_range:
+                        if args.slice_range[0] < loc < args.slice_range[1]:
+                            slices.append(ds)
+                            filenames.append(f)
+                    else:
+                        slices.append(ds)
+                        filenames.append(f)
+                else:
+                    skipcount = skipcount + 1
+            s = sorted(range(len(slices)), key=lambda k: loc[k])
+            if len(s)>0:
+                volume = self.img2var(np.stack([slices[i].pixel_array.astype(self.dtype)+slices[i].RescaleIntercept for i in s]))
+                if self.forceSpacing>0:
+                    scaling = float(slices[0].PixelSpacing[0])/self.forceSpacing
+                    img = rescale(volume,scaling,mode="reflect",preserve_range=True)
+        #            img = imresize(img,(int(img.shape[0]*self.scale), int(img.shape[1]**self.scale)), interp='bicubic')            
+                self.dcms.append(volume)
+                self.names.append( [filenames[i] for i in s] )
+                self.idx.extend([(j,k) for k in range((self.ch-1)//2,len(slices)-self.ch//2)])
+                j = j + 1
+
+        print("#dir {}, #file {}, #skipped {}".format(len(dirlist),len(self.idx),skipcount))
         
     def __len__(self):
-        return len(self.ids)
+        return len(self.idx)
 
     def get_img_path(self, i):
-        return '{:s}.{}'.format(self.ids[i],self.imgtype)
+        j,k=self.idx[i]
+        return self.names[j][k]
 
     def img2var(self,img):
         # cut off mask [-1,1] or [0,1] output
@@ -53,8 +84,9 @@ class DatasetOutMem(dataset_mixin.DatasetMixin):
         return(0.5*(1.0+var)*self.range + self.base)
 #        return(np.round(var*self.range + self.base))
 
-    def overwrite(self,new,fn,salt):
-        ref_dicom = dicom.read_file(fn, force=True)
+    def overwrite(self,new,i,salt):
+        ref_dicom = dicom.dcmread(self.get_img_path(i), force=True)
+        ref_dicom.file_meta.TransferSyntaxUID = dicom.uid.ImplicitVRLittleEndian
         dt=ref_dicom.pixel_array.dtype
         img = np.full(ref_dicom.pixel_array.shape, self.base, dtype=np.float32)
         ch,cw = new.shape
@@ -83,17 +115,7 @@ class DatasetOutMem(dataset_mixin.DatasetMixin):
         return(ref_dicom)
 
     def get_example(self, i):
-        ref_dicom = dicom.read_file(self.get_img_path(i), force=True)
-#        print(ref_dicom)
-        ref_dicom.file_meta.TransferSyntaxUID = dicom.uid.ImplicitVRLittleEndian
-        img = ref_dicom.pixel_array.astype(self.dtype)+ref_dicom.RescaleIntercept
-        if self.forceSpacing>0:
-            scaling = float(ref_dicom.PixelSpacing[0])/self.forceSpacing
-            img = rescale(img,scaling,mode="reflect",preserve_range=True)
-#            img = imresize(img,(int(img.shape[0]*self.scale), int(img.shape[1]**self.scale)), interp='bicubic')            
-        img = self.img2var(img)
-        img = img[np.newaxis,:,:]
+        j,k = self.idx[i]
+        img = self.dcms[j][(k-(self.ch-1)//2):(k+(self.ch+1)//2)]
         h,w = self.crop
-        img = center_crop(img,(h+self.random, w+self.random))
-        img = random_crop(img,self.crop).astype(self.dtype)
-        return img
+        return random_crop(center_crop(img,(h+self.random, w+self.random)),self.crop).astype(self.dtype)

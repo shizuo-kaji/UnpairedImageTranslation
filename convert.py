@@ -13,6 +13,7 @@ import os
 import glob
 import json
 import codecs
+import cv2
 from datetime import datetime as dt
 import time
 import chainer.cuda
@@ -25,13 +26,23 @@ from chainercv.utils import write_image
 from chainercv.transforms import resize
 from chainerui.utils import save_args
 from arguments import arguments 
-from consts import activation,dtypes
+from consts import dtypes
+from chainer.links import VGG16Layers
 
 def gradimg(img):
     grad = xp.tile(xp.asarray([[[[1,0,-1],[2,0,-2],[1,0,-1]]]],dtype=img.dtype),(img.data.shape[1],1,1))
     dx = F.convolution_2d(img,grad)
     dy = F.convolution_2d(img,xp.transpose(grad,(0,1,3,2)))
     return(F.sqrt(dx**2+dy**2))
+
+def heatmap(heat,src):  ## heat [0,1], src [-1,1] grey
+#    h = cv2.normalize(heat[0], h, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+    h = np.uint8(np.clip(heat,0,1)*255)
+    h = cv2.resize(h, (src.shape[2],src.shape[1]))
+    h = cv2.applyColorMap(np.uint8(h), cv2.COLORMAP_JET)
+    h = np.transpose(127.5*(src+1),(1,2,0)) + h
+    h = np.uint8(255 * h / h.max())
+    return(h)
 
 if __name__ == '__main__':
     args = arguments()
@@ -48,37 +59,30 @@ if __name__ == '__main__':
         with open(args.argfile, 'r') as f:
             larg = json.load(f)
             root=os.path.dirname(args.argfile)
-            for x in ['HU_base','HU_range','forceSpacing',
-              'dis_norm','dis_activation','dis_chs','dis_ksize','dis_sample','dis_down',
+            for x in ['HU_base','HU_range','forceSpacing','perceptual_layer','num_slices',
+              'dis_norm','dis_activation','dis_chs','dis_ksize','dis_sample','dis_down','dis_reg_weighting',
               'gen_norm','gen_activation','gen_out_activation','gen_nblock','gen_chs','gen_sample','gen_down','gen_up','gen_ksize','unet',
-              'conditional_discriminator','gen_fc','gen_fc_activation','spconv','eqconv','wgan','dtype']:
+              'gen_fc','gen_fc_activation','spconv','eqconv','wgan','dtype']:
                 if x in larg:
                     setattr(args, x, larg[x])
             if not args.load_models:
                 if larg["epoch"]:
-                    args.load_models=os.path.join(root,'gen_g{}.npz'.format(larg["epoch"]))
-                else:
-                    args.load_models=os.path.join(root,'gen_g{}.npz'.format(larg["lrdecay_start"]+larg["lrdecay_period"]))
+                    args.load_models=os.path.join(root,'enc_x{}.npz'.format(larg["epoch"]))
                     
     args.random_translate = 0
     save_args(args, outdir)
-    args.dtype = dtypes[args.dtype]
-    args.dis_activation = activation[args.dis_activation]
-    args.gen_activation = activation[args.gen_activation]
-    args.gen_out_activation = activation[args.gen_out_activation]
-    args.gen_fc_activation = activation[args.gen_fc_activation]
     print(args)
     # Enable autotuner of cuDNN
     chainer.config.autotune = True
-    chainer.config.dtype = args.dtype
+    chainer.config.dtype = dtypes[args.dtype]
 
     ## load images
     if args.imgtype=="dcm":
-        from dataset_dicom import DatasetOutMem as Dataset 
+        from dataset_dicom import Dataset as Dataset 
     else:
         from dataset_jpg import DatasetOutMem as Dataset   
 
-    dataset = Dataset(path=args.root, baseA=args.HU_base, rangeA=args.HU_range, slice_range=args.slice_range, crop=(args.crop_height,args.crop_width), random=0, forceSpacing=0, imgtype=args.imgtype, dtype=args.dtype)
+    dataset = Dataset(path=args.root, args=args, random=0, forceSpacing=0)
     args.ch = dataset.ch
 #    iterator = chainer.iterators.MultiprocessIterator(dataset, args.batch_size, n_processes=3, repeat=False, shuffle=False)
     iterator = chainer.iterators.MultithreadIterator(dataset, args.batch_size, n_threads=3, repeat=False, shuffle=False)   ## best performance
@@ -94,7 +98,6 @@ if __name__ == '__main__':
             xp = gen.xp
             is_AE = False
     elif "enc" in args.load_models:
-        args.gen_nblock = args.gen_nblock // 2  # to match ordinary cycleGAN
         enc = net.Encoder(args)
         print('Loading {:s}..'.format(args.load_models))
         serializers.load_npz(args.load_models, enc)
@@ -109,25 +112,35 @@ if __name__ == '__main__':
         xp = enc.xp
         is_AE = True
     else:
-        print("Specify a learnt model.")
+        print("Specify a learned model file.")
         exit()        
 
     ## prepare networks for analysis 
     if args.output_analysis:
+        vgg = VGG16Layers()  # for perceptual loss
+        vgg.to_gpu()
         if is_AE:
-            enc_y = net.Encoder(args)
-            dec_x = net.Decoder(args)
-            dis_x = net.Discriminator(args)
-            dis_y = net.Discriminator(args)
-            models = {'enc_y': enc_y, 'dec_x': dec_x, 'dis_x': dis_x, 'dis_y': dis_y}
+            enc_i = net.Encoder(args)
+            dec_i = net.Decoder(args)
+            dis = net.Discriminator(args)
+            dis_i = net.Discriminator(args)
+            if "enc_x" in args.load_models:
+                models = {'enc_y': enc_i, 'dec_x': dec_i, 'dis_x': dis_i, 'dis_y': dis}
+            else:
+                models = {'enc_x': enc_i, 'dec_y': dec_i, 'dis_y': dis_i, 'dis_x': dis}
         else:
-            gen_f = net.Generator(args)
-            dis_y = net.Discriminator(args)
-            dis_x = net.Discriminator(args)
-            models = {'gen_f':gen_f, 'dis_x':dis_x, 'dis_y':dis_y}
+            gen_i = net.Generator(args)
+            dis = net.Discriminator(args)
+            dis_i = net.Discriminator(args)
+            if "gen_f" in args.load_models:
+                models = {'gen_i':gen_f,'dis_x':dis_i, 'dis_y':dis}
+            else:
+                models = {'gen_i':gen_g,'dis_y':dis_i, 'dis_x':dis}
         for e in models:
             path = args.load_models.replace('gen_g',e)
+            path = path.replace('gen_f',e)
             path = path.replace('enc_x',e)
+            path = path.replace('enc_y',e)
             if os.path.exists(path):
                 print('Loading {:s}..'.format(path))
                 serializers.load_npz(path, models[e])
@@ -145,120 +158,121 @@ if __name__ == '__main__':
         imgs = Variable(chainer.dataset.concat_examples(batch, device=args.gpu))
         with chainer.using_config('train', False),chainer.function.no_backprop_mode():
             if is_AE:
-                out_v = dec(enc(imgs))
+                out = dec(enc(imgs))
             else:
-                out_v = gen(imgs)
+                out = gen(imgs)
         if args.output_analysis:
-            img_disx = dis_x(imgs)
-            ## gradcam for input
-            img_disx.grad=xp.full(img_disx.data.shape, 1.0, dtype=imgs.dtype)
-            dis_x.cleargrads()
-            img_disx.backward(retain_grad=True)
-            #
-#            loss = F.sum((img_disx-xp.full(img_disx.data.shape, 1.0, dtype=img_disx.dtype))**2)
-#            gd_x, = chainer.grad([loss],[imgs])
-#            gd_x = np.clip(np.absolute(xp.asnumpy(gd_x.data)),0,10)
-            ## gradcam for output
-            img_disy = dis_y(out_v)
-            img_disy.grad=xp.full(img_disy.data.shape, 1.0, dtype=imgs.dtype)
-            dis_y.cleargrads()
-            img_disy.backward(retain_grad=True)
-
+            img_disx = dis_i(imgs)
+            img_disy = dis(out)
+            # perceptual diff
+            layer = args.perceptual_layer
+            if imgs.shape[1] == 1:
+                perc_diff = vgg(F.concat([imgs,imgs,imgs]), layers=[layer])[layer] - vgg(F.concat([out,out,out]), layers=[layer])[layer]
+            else:
+                perc_diff = vgg(imgs, layers=[layer])[layer] - vgg(out, layers=[layer])[layer]
+            # tv
+            dx = out[:, :, 1:, :-1] - out[:, :, :-1, :-1]
+            dy = out[:, :, :-1, 1:] - out[:, :, :-1, :-1]
+            tv = F.sqrt(dx**2 + dy**2 + 1e-8)
             ## cycle
             with chainer.using_config('train', False):
                 if is_AE:
-                    cycle = dec_x(enc_y(out_v))
+                    cycle = dec_i(enc_i(out))
                 else:
-                    cycle = gen_f(out_v)
-#            diff = cycle - imgs
-            diff = gradimg(cycle)-gradimg(imgs)
-            if args.gpu >= 0:
-                weights_x = xp.asnumpy(xp.mean(imgs.grad, axis=(2, 3)))
-                img_disx = np.abs(xp.asnumpy(img_disx.data)-1)
-                weights_y = xp.asnumpy(xp.mean(out_v.grad, axis=(2, 3)))
-                img_disy = np.abs(xp.asnumpy(img_disy.data)-1)
-                cycle_diff = xp.asnumpy(diff.data)
-                cycle = xp.asnumpy(cycle.data)
-            else:
-                weights_x = xp.mean(imgs.grad, axis=(2, 3))
-                img_disx = np.abs(img_disx.data-1)
-                weights_y = xp.mean(out_v.grad, axis=(2, 3))
-                img_disy = np.abs(img_disy.data-1)
-                cycle_diff = diff.data
-                cycle = cycle.data
-
-        if args.gpu >= 0:
-            imgs = xp.asnumpy(imgs.data)
-            out = xp.asnumpy(out_v.data)
-        else:
+                    cycle = gen_i(out)
+            diff = cycle - imgs
+#            diff = gradimg(cycle)-gradimg(imgs)
+            img_disx.to_cpu()
+            img_disy.to_cpu()
+            imgs.to_cpu()
+            diff.to_cpu()
+            cycle.to_cpu()
+            tv.to_cpu()
+            perc_diff.to_cpu()
+            img_disx = img_disx.data
+            img_disy = img_disy.data
             imgs = imgs.data
-            out = out_v.data
+            cycle_diff = diff.data
+            cycle = cycle.data
+            tv = tv.data
+            perc_diff = perc_diff.data
 
-        
+        ##
+        out.to_cpu()
+        out = out.data        
         ## output images
         for i in range(len(out)):
             fn = dataset.get_img_path(cnt)
+            dname = os.path.dirname(fn)
+            fn = os.path.basename(os.path.splitext(fn)[0])
             print("\nProcessing {}".format(fn))
             new = dataset.var2img(out[i]) 
             print("raw value: {} {}".format(np.min(out[i]),np.max(out[i])))
             #print(new.shape)
-            if len(new.shape)==3:
-                cc,ch,cw = new.shape
-            else:
-                cc=1
-                ch,cw = new.shape
             h,w = dataset.crop
 
             # converted image
             if args.imgtype=="dcm":
-                if os.path.dirname(fn) != prevdir:
+                if  dname != prevdir:
                     salt = str(random.randint(1000, 999999))
-                    prevdir = os.path.dirname(fn)
-                ref_dicom = dataset.overwrite(new[0],fn,salt)
-                path = os.path.join(outdir,'{:s}_{}.dcm'.format(os.path.basename(fn),args.suffix))
-                ref_dicom.save_as(path)
-                ch,cw=ref_dicom.pixel_array.shape
+                    prevdir = dname
+                for j in range(args.num_slices):
+                    ref_dicom = dataset.overwrite(new[j],cnt,salt)
+                    path = os.path.join(outdir,'{:s}_{}_{}.dcm'.format(fn,args.suffix,j))
+                    ref_dicom.save_as(path)
             else:
-                path = os.path.join(outdir,'{:s}_{}.jpg'.format(os.path.basename(fn),args.suffix))
+                path = os.path.join(outdir,'{:s}_{}.jpg'.format(fn,args.suffix))
                 write_image(new, path)
 
             ## images for analysis
             if args.output_analysis:
                 # original
-                path = os.path.join(outdir,'{:s}_0org.jpg'.format(os.path.basename(fn)))
+                path = os.path.join(outdir,'{:s}_0orig.png'.format(fn))
                 write_image( (imgs[i]*127.5+127.5).astype(np.uint8), path)
-                # converted
-                path = os.path.join(outdir,'{:s}_3out.jpg'.format(os.path.basename(fn)))
-                write_image( (out[i]*127.5+127.5).astype(np.uint8), path)
                 # cycle
-                path = os.path.join(outdir,'{:s}_1cycle.jpg'.format(os.path.basename(fn)))
+                path = os.path.join(outdir,'{:s}_1cycle.png'.format(fn))
                 write_image( (cycle[i]*127.5+127.5).astype(np.uint8), path)
-                # cycle grad image difference
-                path = os.path.join(outdir,'{:s}_2cycle_diff.jpg'.format(os.path.basename(fn)))
+                # cycle difference
+                path = os.path.join(outdir,'{:s}_2cycle_diff.png'.format(fn))
 #                cycle_diff[i] = (cycle_diff[i]+1)/(imgs[i]+2)   # [0,2]/[1,3] = (0.0,1.5)
-                cycle_diff[i] = (cycle_diff[i]+2)/4
+                cycle_diff[i] = np.abs(0.5*cycle_diff[i])
                 print("cycle diff: {} {} {}".format(np.min(cycle_diff[i]),np.mean(cycle_diff[i]),np.max(cycle_diff[i])))
-                write_image( (np.clip(cycle_diff[i],0,1)*255).astype(np.uint8), path) 
-                # gradcam for dis_x
-#                gd_x = np.clip(np.tensordot(weights_x[i], img_disx[i], axes=(0, 0))*100,0,1)
-#                print("dis dx: {} {} {}".format(np.min(gd_x),np.mean(gd_x),np.max(gd_x)))
-#                path = os.path.join(outdir,'{:s}_5disdx.jpg'.format(os.path.basename(fn)))
-#                img = np.zeros((cc,ch,cw), dtype=np.uint8)
-#                img[:,(ch-h)//2:(ch+h)//2,(cw-w)//2:(cw+w)//2] = 
-#                write_image(resize(gd_x[np.newaxis,]*255,(h,w)), path)
+                cv2.imwrite(path, heatmap(cycle_diff[i,0],imgs[i]))
+                # converted
+                path = os.path.join(outdir,'{:s}_2out.png'.format(fn))
+                write_image( (out[i]*127.5+127.5).astype(np.uint8), path)
+                # perceptual difference
+                path = os.path.join(outdir,'{:s}_3perc_diff.png'.format(fn))
+                print("perc diff: {} {} {}".format(np.min(perc_diff[i]),np.mean(perc_diff[i]),np.max(perc_diff[i])))
+                cv2.imwrite(path, heatmap(perc_diff[i,0],out[i]))
                 # discriminator for original
-                path = os.path.join(outdir,'{:s}_4disx.jpg'.format(os.path.basename(fn)))
-                print("dis x: {} {} {}".format(np.min(img_disx[i]),np.mean(img_disx[i]),np.max(img_disx[i])))
-                write_image(resize(np.clip(img_disx[i],0,1)*255,(h,w)), path)
-                # gradcam for dis_y
-#                gd_y = np.clip(np.tensordot(weights_y[i], img_disy[i], axes=(0, 0))*30,0,1)
-#                print("dis dy: {} {} {}".format(np.min(gd_y[i]),np.mean(gd_y[i]),np.max(gd_y[i])))
-#                path = os.path.join(outdir,'{:s}_6disdy.jpg'.format(os.path.basename(fn)))
-#                write_image(resize(gd_y[np.newaxis,]*255,(h,w)), path)
+                if(img_disx[i].shape[0]==2):
+                    wg=np.tanh(img_disx[i,1])+1
+                    path = os.path.join(outdir,'{:s}_5disx_weight.png'.format(fn))
+                    print("dis x_w: {} {} {}".format(np.min(wg),np.mean(wg),np.max(wg)))
+                    cv2.imwrite(path, heatmap(wg,imgs[i]))
+                    d = (1-img_disx[i,0])*wg
+                else:
+                    d = 1-img_disx[i,0]
+                path = os.path.join(outdir,'{:s}_4disx.png'.format(fn))
+                print("dis x: {} {} {}".format(np.min(d),np.mean(d),np.max(d)))
+                cv2.imwrite(path, heatmap(d,imgs[i]))
                 # discriminator for converted
-                path = os.path.join(outdir,'{:s}_7disy.jpg'.format(os.path.basename(fn)))
-                print("dis y: {} {} {}".format(np.min(img_disy[i]),np.mean(img_disy[i]),np.max(img_disy[i])))
-                write_image(resize(np.clip(img_disy[i],0,1)*255,(h,w)), path)
+                if(img_disy[i].shape[0]==2):
+                    wg=np.tanh(img_disy[i,1])+1
+                    path = os.path.join(outdir,'{:s}_8disy_weight.png'.format(fn))
+                    print("dis y_w: {} {} {}".format(np.min(wg),np.mean(wg),np.max(wg)))
+                    cv2.imwrite(path, heatmap(wg,out[i]))
+                    d = (1-img_disy[i,0])*wg
+                else:
+                    d = 1-img_disy[i,0]
+                path = os.path.join(outdir,'{:s}_7disy.png'.format(fn))
+                print("dis y: {} {} {}".format(np.min(d),np.mean(d),np.max(d)))
+                cv2.imwrite(path, heatmap(d,out[i]))
+                # total variation
+                path = os.path.join(outdir,'{:s}_9tv.png'.format(fn))
+                print("TV: {} {} {}".format(np.min(tv[i]),np.mean(tv[i]),np.max(tv[i])))
+                cv2.imwrite(path, heatmap(tv[i,0],out[i]))
 
             cnt += 1
         ####
