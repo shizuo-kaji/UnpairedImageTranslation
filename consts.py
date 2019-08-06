@@ -39,8 +39,8 @@ activation_func = {
     'none': None,
 }
 
-downlayer = ['down','maxpool','maxpool_res','avgpool','avgpool_res','none']
-uplayer = ['unpool','unpool_res','deconv','pixsh','resize','resize_res','none']
+downlayer = ['down','maxpool','maxpool_res','avgpool','avgpool_res']
+uplayer = ['unpool','unpool_res','deconv','pixsh','pixsh_res','resize','resize_res']
 unettype = ['none','concat','add','conv']
 
 def feature_vector_normalization(x, eps=1e-8):
@@ -48,6 +48,7 @@ def feature_vector_normalization(x, eps=1e-8):
     return F.broadcast_to(alpha, x.data.shape) * x
 
 norm_layer = {
+    'none': lambda x: F.identity,
     'batch': functools.partial(L.BatchNormalization, use_gamma=False, use_beta=True),
     'batch_aff': functools.partial(L.BatchNormalization, use_gamma=True, use_beta=True),
     'layer': L.LayerNormalization,

@@ -9,6 +9,7 @@ class Updater(chainer.training.StandardUpdater):
     def __init__(self, *args, **kwargs):
         self.enc_x, self.dec_x, self.enc_y, self.dec_y, self.dis_x, self.dis_y, self.dis_z = kwargs.pop('models')
         params = kwargs.pop('params')
+#        self.device_id = kwargs.pop('device')
         super(Updater, self).__init__(*args, **kwargs)
         self.args = params['args']
         self.xp = self.enc_x.xp
@@ -51,7 +52,7 @@ class Updater(chainer.training.StandardUpdater):
         ## discriminator for the latent space: distribution of image of enc_x should look same as that of enc_y
         # since z is a list (for u-net), we use only the output of the last layer
         if self.args.lambda_dis_z>0:
-            if self.args.wgan:
+            if self.args.dis_wgan:
                 loss_enc_x_adv = -F.average(self.dis_z(x_z[-1]))
                 loss_enc_y_adv = F.average(self.dis_z(y_z[-1]))
             else:
@@ -93,7 +94,7 @@ class Updater(chainer.training.StandardUpdater):
         ## adversarial for Y
         if self.args.lambda_dis_y>0:
             x_y_copy = Variable(self._buffer_y.query(x_y.data))
-            if self.args.wgan:
+            if self.args.dis_wgan:
                 loss_dec_y_adv = -F.average(self.dis_y(x_y))
             else:
                 loss_dec_y_adv = losses.loss_func_comp(self.dis_y(x_y),1.0)
@@ -103,7 +104,7 @@ class Updater(chainer.training.StandardUpdater):
         ## adversarial for X
         if self.args.lambda_dis_x>0:
             y_x_copy = Variable(self._buffer_x.query(y_x.data))
-            if self.args.wgan:
+            if self.args.dis_wgan:
                 loss_dec_x_adv = -F.average(self.dis_x(y_x))
             else:
                 loss_dec_x_adv = losses.loss_func_comp(self.dis_x(y_x),1.0)
@@ -176,122 +177,121 @@ class Updater(chainer.training.StandardUpdater):
             opt_enc_y.update(loss=loss_gen)
         opt_dec_y.update(loss=loss_gen)
 
-        ## discriminators
-        for t in range(self.args.n_critics):
-            ## discriminator for Y
-            if self.args.wgan: ## synthesised -, real +
-                eps = self.xp.random.uniform(0, 1, size=len(batch_y)).astype(self.xp.float32)[:, None, None, None]
-                ## discriminator for X=>Y
-                loss_dis_y_fake = F.average(self.dis_y(x_y_copy))
-                loss_dis_y_real = -F.average(self.dis_y(y))
-                loss_dis_y_reg = 0
-                y_mid = eps * y + (1.0 - eps) * x_y_copy
-                # gradient penalty
-                gd_y, = chainer.grad([self.dis_y(y_mid)], [y_mid], enable_double_backprop=True)
-                gd_y = F.sqrt(F.batch_l2_norm_squared(gd_y) + 1e-6)
-                loss_dis_y_gp = F.mean_squared_error(gd_y, self.xp.ones_like(gd_y.data))                
-                if self.report_start<self.iteration:
-                    chainer.report({'loss_gp': self.args.lambda_wgan_gp * loss_dis_y_gp}, self.dis_y)
-
-                ## discriminator for B=>A
-                loss_dis_x_fake = F.average(self.dis_x(y_x_copy))
-                loss_dis_x_real = -F.average(self.dis_x(x))
-                loss_dis_x_reg = 0
-                x_mid = eps * x + (1.0 - eps) * y_x_copy
-                # gradient penalty
-                gd_x, = chainer.grad([self.dis_x(x_mid)], [x_mid], enable_double_backprop=True)
-                gd_x = F.sqrt(F.batch_l2_norm_squared(gd_x) + 1e-6)
-                loss_dis_x_gp = F.mean_squared_error(gd_x, self.xp.ones_like(gd_x.data))
-                if self.report_start<self.iteration:
-                    chainer.report({'loss_gp': self.args.lambda_wgan_gp *loss_dis_x_gp}, self.dis_x)
-
-                ## discriminator for latent: X -> Z is - while Y -> Z is +
-                if self.args.lambda_dis_z>0 and t==0:
-                    loss_dis_z_x = F.average(self.dis_z(x_z[-1]))
-                    loss_dis_z_y = -F.average(self.dis_z(y_z[-1]))
-                    z_mid = eps * x_z[-1] + (1.0 - eps) * y_z[-1]
-                    # gradient penalty
-                    gd_z, = chainer.grad([self.dis_z(z_mid)], [z_mid], enable_double_backprop=True)
-                    gd_z = F.sqrt(F.batch_l2_norm_squared(gd_z) + 1e-6)
-                    loss_dis_z_gp = F.mean_squared_error(gd_z, self.xp.ones_like(gd_z.data))                
-                    if self.report_start<self.iteration:
-                        chainer.report({'loss_x': loss_dis_z_x}, self.dis_z)
-                        chainer.report({'loss_y': loss_dis_z_y}, self.dis_z)
-                        chainer.report({'loss_gp': self.args.lambda_wgan_gp * loss_dis_y_gp}, self.dis_y)
-                    loss_dis_z = (loss_dis_z_x + loss_dis_z_y) * 0.5 + self.args.lambda_wgan_gp * loss_dis_x_gp
-                    self.dis_z.cleargrads()
-                    loss_dis_z.backward()
-                    opt_z.update(loss=loss_dis_z)
-
-            else:  ## LSGAN
-                ## discriminator for A=>B (real:1, fake:0)
-                disy_fake = self.dis_y(x_y_copy)
-                loss_dis_y_fake = losses.loss_func_comp(disy_fake,0.0, self.args.dis_jitter)
-                disy_real = self.dis_y(y)
-                loss_dis_y_real = losses.loss_func_comp(disy_real,1.0, self.args.dis_jitter)
-                if self.args.dis_reg_weighting>0:  ## regularization
-                    loss_dis_y_reg = (F.average(F.absolute(disy_real[:,1,:,:])) + F.average(F.absolute(disy_fake[:,1,:,:])))
-                else:
-                    loss_dis_y_reg = 0
-                if self.report_start<self.iteration:
-                    chainer.report({'loss_reg': loss_dis_y_reg}, self.dis_y)
-                loss_dis_y_gp = 0
-
-                ## discriminator for B=>A
-                disx_fake = self.dis_x(y_x_copy)
-                loss_dis_x_fake = losses.loss_func_comp(disx_fake,0.0, self.args.dis_jitter)
-                disx_real = self.dis_x(x)
-                loss_dis_x_real = losses.loss_func_comp(disx_real,1.0, self.args.dis_jitter)
-                if self.args.dis_reg_weighting>0: ## regularization
-                    loss_dis_x_reg = (F.average(F.absolute(disx_fake[:,1,:,:]))+ F.average(F.absolute(disx_real[:,1,:,:])))
-                else:
-                    loss_dis_x_reg = 0
-                if self.report_start<self.iteration:
-                    chainer.report({'loss_reg': loss_dis_x_reg}, self.dis_x)
-                loss_dis_x_gp = 0
-            
-                ## discriminator for latent: X -> Z is 0.0 while Y -> Z is 1.0
-                if self.args.lambda_dis_z>0 and t==0:
-                    disz_xz = self.dis_z(x_z[-1])
-                    loss_dis_z_x = losses.loss_func_comp(disz_xz,0.0,self.args.dis_jitter)
-                    disz_yz = self.dis_z(y_z[-1])
-                    loss_dis_z_y = losses.loss_func_comp(disz_yz,1.0,self.args.dis_jitter)
-                    if self.args.dis_reg_weighting>0: ## regularization
-                        loss_dis_z_reg = (F.average(F.absolute(disz_xz[:,1,:,:]))+ F.average(F.absolute(disz_yz[:,1,:,:])))
-                    else:
-                        loss_dis_z_reg = 0
-                    if self.report_start<self.iteration:
-                        chainer.report({'loss_x': loss_dis_z_x}, self.dis_z)
-                        chainer.report({'loss_y': loss_dis_z_y}, self.dis_z)
-                        chainer.report({'loss_reg': loss_dis_z_reg}, self.dis_z)                
-                    loss_dis_z = (loss_dis_z_x + loss_dis_z_y) * 0.5 + self.args.dis_reg_weighting * loss_dis_x_reg
-                    self.dis_z.cleargrads()
-                    loss_dis_z.backward()
-                    opt_z.update(loss=loss_dis_z)
-
-            # discriminator common
+        ##########################################
+        ## discriminator for Y
+        if self.args.dis_wgan: ## synthesised -, real +
+            eps = self.xp.random.uniform(0, 1, size=len(batch_y)).astype(self.xp.float32)[:, None, None, None]
+            ## discriminator for X=>Y
+            loss_dis_y_fake = F.average(self.dis_y(x_y_copy))
+            loss_dis_y_real = -F.average(self.dis_y(y))
+            loss_dis_y_reg = 0
+            y_mid = eps * y + (1.0 - eps) * x_y_copy
+            # gradient penalty
+            gd_y, = chainer.grad([self.dis_y(y_mid)], [y_mid], enable_double_backprop=True)
+            gd_y = F.sqrt(F.batch_l2_norm_squared(gd_y) + 1e-6)
+            loss_dis_y_gp = F.mean_squared_error(gd_y, self.xp.ones_like(gd_y.data))                
             if self.report_start<self.iteration:
-                chainer.report({'loss_fake': loss_dis_x_fake}, self.dis_x)
-                chainer.report({'loss_real': loss_dis_x_real}, self.dis_x)
-                chainer.report({'loss_fake': loss_dis_y_fake}, self.dis_y)
-                chainer.report({'loss_real': loss_dis_y_real}, self.dis_y)
+                chainer.report({'loss_gp': self.args.lambda_wgan_gp * loss_dis_y_gp}, self.dis_y)
 
-            # back-propagation
-            loss_dis_y = (loss_dis_y_fake + loss_dis_y_real) * 0.5 + self.args.dis_reg_weighting * loss_dis_y_reg + self.args.lambda_wgan_gp * loss_dis_y_gp
-            self.dis_y.cleargrads()
-            loss_dis_y.backward()
-            opt_y.update(loss=loss_dis_y)
-            loss_dis_x = (loss_dis_x_fake + loss_dis_x_real) * 0.5 + self.args.dis_reg_weighting * loss_dis_x_reg + self.args.lambda_wgan_gp * loss_dis_x_gp
-            self.dis_x.cleargrads()
-            loss_dis_x.backward()
-            opt_x.update(loss=loss_dis_x)
+            ## discriminator for B=>A
+            loss_dis_x_fake = F.average(self.dis_x(y_x_copy))
+            loss_dis_x_real = -F.average(self.dis_x(x))
+            loss_dis_x_reg = 0
+            x_mid = eps * x + (1.0 - eps) * y_x_copy
+            # gradient penalty
+            gd_x, = chainer.grad([self.dis_x(x_mid)], [x_mid], enable_double_backprop=True)
+            gd_x = F.sqrt(F.batch_l2_norm_squared(gd_x) + 1e-6)
+            loss_dis_x_gp = F.mean_squared_error(gd_x, self.xp.ones_like(gd_x.data))
+            if self.report_start<self.iteration:
+                chainer.report({'loss_gp': self.args.lambda_wgan_gp *loss_dis_x_gp}, self.dis_x)
 
-            # prepare next images
-            if(t<self.args.n_critics-1):
-                x_y_copy = Variable(self.xp.concatenate(random.sample(self._buffer_y.images,self.args.batch_size)))
-                y_x_copy = Variable(self.xp.concatenate(random.sample(self._buffer_x.images,self.args.batch_size)))
-                batch_x = self.get_iterator('main').next()
-                batch_y = self.get_iterator('train_B').next()
-                x = Variable(self.converter(batch_x, self.device))
-                y = Variable(self.converter(batch_y, self.device))
+            ## discriminator for latent: X -> Z is - while Y -> Z is +
+            if self.args.lambda_dis_z>0 and t==0:
+                loss_dis_z_x = F.average(self.dis_z(x_z[-1]))
+                loss_dis_z_y = -F.average(self.dis_z(y_z[-1]))
+                z_mid = eps * x_z[-1] + (1.0 - eps) * y_z[-1]
+                # gradient penalty
+                gd_z, = chainer.grad([self.dis_z(z_mid)], [z_mid], enable_double_backprop=True)
+                gd_z = F.sqrt(F.batch_l2_norm_squared(gd_z) + 1e-6)
+                loss_dis_z_gp = F.mean_squared_error(gd_z, self.xp.ones_like(gd_z.data))                
+                if self.report_start<self.iteration:
+                    chainer.report({'loss_x': loss_dis_z_x}, self.dis_z)
+                    chainer.report({'loss_y': loss_dis_z_y}, self.dis_z)
+                    chainer.report({'loss_gp': self.args.lambda_wgan_gp * loss_dis_y_gp}, self.dis_y)
+                loss_dis_z = (loss_dis_z_x + loss_dis_z_y) * 0.5 + self.args.lambda_wgan_gp * loss_dis_x_gp
+                self.dis_z.cleargrads()
+                loss_dis_z.backward()
+                opt_z.update(loss=loss_dis_z)
+
+        else:  ## LSGAN
+            ## discriminator for A=>B (real:1, fake:0)
+            disy_fake = self.dis_y(x_y_copy)
+            loss_dis_y_fake = losses.loss_func_comp(disy_fake,0.0, self.args.dis_jitter)
+            disy_real = self.dis_y(y)
+            loss_dis_y_real = losses.loss_func_comp(disy_real,1.0, self.args.dis_jitter)
+            if self.args.dis_reg_weighting>0:  ## regularization
+                loss_dis_y_reg = (F.average(F.absolute(disy_real[:,1,:,:])) + F.average(F.absolute(disy_fake[:,1,:,:])))
+            else:
+                loss_dis_y_reg = 0
+            if self.report_start<self.iteration:
+                chainer.report({'loss_reg': loss_dis_y_reg}, self.dis_y)
+            loss_dis_y_gp = 0
+
+            ## discriminator for B=>A
+            disx_fake = self.dis_x(y_x_copy)
+            loss_dis_x_fake = losses.loss_func_comp(disx_fake,0.0, self.args.dis_jitter)
+            disx_real = self.dis_x(x)
+            loss_dis_x_real = losses.loss_func_comp(disx_real,1.0, self.args.dis_jitter)
+            if self.args.dis_reg_weighting>0: ## regularization
+                loss_dis_x_reg = (F.average(F.absolute(disx_fake[:,1,:,:]))+ F.average(F.absolute(disx_real[:,1,:,:])))
+            else:
+                loss_dis_x_reg = 0
+            if self.report_start<self.iteration:
+                chainer.report({'loss_reg': loss_dis_x_reg}, self.dis_x)
+            loss_dis_x_gp = 0
+        
+            ## discriminator for latent: X -> Z is 0.0 while Y -> Z is 1.0
+            if self.args.lambda_dis_z>0 and t==0:
+                disz_xz = self.dis_z(x_z[-1])
+                loss_dis_z_x = losses.loss_func_comp(disz_xz,0.0,self.args.dis_jitter)
+                disz_yz = self.dis_z(y_z[-1])
+                loss_dis_z_y = losses.loss_func_comp(disz_yz,1.0,self.args.dis_jitter)
+                if self.args.dis_reg_weighting>0: ## regularization
+                    loss_dis_z_reg = (F.average(F.absolute(disz_xz[:,1,:,:]))+ F.average(F.absolute(disz_yz[:,1,:,:])))
+                else:
+                    loss_dis_z_reg = 0
+                if self.report_start<self.iteration:
+                    chainer.report({'loss_x': loss_dis_z_x}, self.dis_z)
+                    chainer.report({'loss_y': loss_dis_z_y}, self.dis_z)
+                    chainer.report({'loss_reg': loss_dis_z_reg}, self.dis_z)                
+                loss_dis_z = (loss_dis_z_x + loss_dis_z_y) * 0.5 + self.args.dis_reg_weighting * loss_dis_x_reg
+                self.dis_z.cleargrads()
+                loss_dis_z.backward()
+                opt_z.update(loss=loss_dis_z)
+
+        # discriminator common
+        if self.report_start<self.iteration:
+            chainer.report({'loss_fake': loss_dis_x_fake}, self.dis_x)
+            chainer.report({'loss_real': loss_dis_x_real}, self.dis_x)
+            chainer.report({'loss_fake': loss_dis_y_fake}, self.dis_y)
+            chainer.report({'loss_real': loss_dis_y_real}, self.dis_y)
+
+        # back-propagation
+        loss_dis_y = (loss_dis_y_fake + loss_dis_y_real) * 0.5 + self.args.dis_reg_weighting * loss_dis_y_reg + self.args.lambda_wgan_gp * loss_dis_y_gp
+        self.dis_y.cleargrads()
+        loss_dis_y.backward()
+        opt_y.update(loss=loss_dis_y)
+        loss_dis_x = (loss_dis_x_fake + loss_dis_x_real) * 0.5 + self.args.dis_reg_weighting * loss_dis_x_reg + self.args.lambda_wgan_gp * loss_dis_x_gp
+        self.dis_x.cleargrads()
+        loss_dis_x.backward()
+        opt_x.update(loss=loss_dis_x)
+
+        # prepare next images
+        # if(t<self.args.n_critics-1):
+        #     x_y_copy = Variable(self.xp.concatenate(random.sample(self._buffer_y.images,self.args.batch_size)))
+        #     y_x_copy = Variable(self.xp.concatenate(random.sample(self._buffer_x.images,self.args.batch_size)))
+        #     batch_x = self.get_iterator('main').next()
+        #     batch_y = self.get_iterator('train_B').next()
+        #     x = Variable(self.converter(batch_x, self.device))
+        #     y = Variable(self.converter(batch_y, self.device))
 

@@ -60,10 +60,13 @@ if __name__ == '__main__':
             larg = json.load(f)
             root=os.path.dirname(args.argfile)
             for x in ['HU_base','HU_range','forceSpacing','perceptual_layer','num_slices',
-              'dis_norm','dis_activation','dis_chs','dis_ksize','dis_sample','dis_down','dis_reg_weighting',
+              'dis_norm','dis_activation','dis_chs','dis_ksize','dis_sample','dis_down','dis_reg_weighting','dis_wgan',
               'gen_norm','gen_activation','gen_out_activation','gen_nblock','gen_chs','gen_sample','gen_down','gen_up','gen_ksize','unet',
-              'gen_fc','gen_fc_activation','spconv','eqconv','wgan','dtype']:
+              'gen_fc','gen_fc_activation','spconv','eqconv','senet','dtype']:
                 if x in larg:
+                    setattr(args, x, larg[x])
+            for x in ['imgtype','crop_width','crop_height']:
+                if not getattr(args, x):
                     setattr(args, x, larg[x])
             if not args.load_models:
                 if larg["epoch"]:
@@ -112,8 +115,10 @@ if __name__ == '__main__':
         xp = enc.xp
         is_AE = True
     else:
-        print("Specify a learned model file.")
-        exit()        
+        gen = F.identity
+        xp = np
+        is_AE = False
+        print("Identity...")
 
     ## prepare networks for analysis 
     if args.output_analysis:

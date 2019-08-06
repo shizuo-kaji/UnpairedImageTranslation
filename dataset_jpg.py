@@ -6,8 +6,7 @@ from chainer.dataset import dataset_mixin
 import numpy as np
 from PIL import Image
 
-from chainercv.transforms import random_crop
-from chainercv.transforms import random_flip
+from chainercv.transforms import random_crop,center_crop,random_flip
 from chainercv.transforms import resize
 from chainercv.utils import read_image
 
@@ -18,7 +17,7 @@ class DatasetOutMem(dataset_mixin.DatasetMixin):
     def __init__(self, path, args, random=0, forceSpacing=0):
         self.path = path
         self.names = []
-        self.flip = random
+        self.random = random
         self.color=True
         self.ch = 3 if self.color else 1
         self.imgtype=args.imgtype
@@ -31,7 +30,7 @@ class DatasetOutMem(dataset_mixin.DatasetMixin):
         else:
             self.crop = (args.crop_height,args.crop_width)
         self.names = sorted(self.names)
-        print("Cropped size: ",self.crop)
+        print("Cropped to: ",self.crop)
         print("Loaded: {} images".format(len(self.names)))
 
     def __len__(self):
@@ -47,12 +46,12 @@ class DatasetOutMem(dataset_mixin.DatasetMixin):
         img = read_image(self.get_img_path(i),color=self.color)
         img = img * 2 / 255.0 - 1.0  # [-1, 1)
 #        img = resize(img, (self.resize_to, self.resize_to))
-        img = random_crop(img, self.crop)
-        if self.flip:
+        img = random_crop(center_crop(img, (self.crop[0]+self.random,self.crop[1]+self.random)),self.crop)
+        if self.random:
             img = random_flip(img, x_random=True)
         return img.astype(self.dtype)
 
-    def mask(fn):
+    def mask(self,fn):
         img = Image.open(fn)
         # mask
         if img.mode == 'RGBA':

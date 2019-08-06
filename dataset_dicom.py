@@ -6,7 +6,6 @@ import glob
 from chainer.dataset import dataset_mixin
 import numpy as np
 from skimage.transform import rescale
-from scipy.misc import imresize
 from chainercv.transforms import random_crop,center_crop
 from consts import dtypes
 
@@ -33,7 +32,7 @@ class Dataset(dataset_mixin.DatasetMixin):
             if os.path.isdir(os.path.join(path, f)):
                 dirlist.append(os.path.join(path,f))
         skipcount = 0
-        j = 0
+        j = 0  # dir index
         for dirname in sorted(dirlist):
             files = [os.path.join(dirname, fname) for fname in sorted(os.listdir(dirname)) if fname.endswith(args.imgtype)]
             slices = []
@@ -42,6 +41,7 @@ class Dataset(dataset_mixin.DatasetMixin):
             for f in files:
                 ds = dicom.dcmread(f, force=True)
                 ds.file_meta.TransferSyntaxUID = dicom.uid.ImplicitVRLittleEndian
+                # sort slices according to SliceLocation header
                 if hasattr(ds, 'SliceLocation'):
                     # loc.append(float(ds.SliceLocation))
                     loc.append(int(f[-7:-4])) # slice location from filename
@@ -55,12 +55,14 @@ class Dataset(dataset_mixin.DatasetMixin):
                 else:
                     skipcount = skipcount + 1
             s = sorted(range(len(slices)), key=lambda k: loc[k])
+            # if the current dir contains at least one slice
             if len(s)>0:
                 volume = self.img2var(np.stack([slices[i].pixel_array.astype(self.dtype)+slices[i].RescaleIntercept for i in s]))
                 if self.forceSpacing>0:
                     scaling = float(slices[0].PixelSpacing[0])/self.forceSpacing
-                    img = rescale(volume,scaling,mode="reflect",preserve_range=True)
+                    volume = rescale(volume,scaling,mode="reflect",preserve_range=True)
         #            img = imresize(img,(int(img.shape[0]*self.scale), int(img.shape[1]**self.scale)), interp='bicubic')            
+                volume = center_crop(volume,(self.crop[0]+self.random, self.crop[1]+self.random))
                 self.dcms.append(volume)
                 self.names.append( [filenames[i] for i in s] )
                 self.idx.extend([(j,k) for k in range((self.ch-1)//2,len(slices)-self.ch//2)])
@@ -78,22 +80,22 @@ class Dataset(dataset_mixin.DatasetMixin):
     def img2var(self,img):
         # cut off mask [-1,1] or [0,1] output
         return(2*(np.clip(img,self.base,self.base+self.range)-self.base)/self.range-1.0)
-#        return((np.clip(img,self.base,self.base+self.range)-self.base)/self.range)
     
     def var2img(self,var):
         return(0.5*(1.0+var)*self.range + self.base)
-#        return(np.round(var*self.range + self.base))
 
     def overwrite(self,new,i,salt):
         ref_dicom = dicom.dcmread(self.get_img_path(i), force=True)
         ref_dicom.file_meta.TransferSyntaxUID = dicom.uid.ImplicitVRLittleEndian
         dt=ref_dicom.pixel_array.dtype
         img = np.full(ref_dicom.pixel_array.shape, self.base, dtype=np.float32)
-        ch,cw = new.shape
-        h,w = self.crop
-        if np.min(img - ref_dicom.RescaleIntercept)<0:
-            ref_dicom.RescaleIntercept = -1024
-        img[np.newaxis,(ch-h)//2:(ch+h)//2,(cw-w)//2:(cw+w)//2] = new
+        ch,cw = img.shape
+        h,w = new.shape
+        print(img.shape)
+#        if np.min(img - ref_dicom.RescaleIntercept)<0:
+#            ref_dicom.RescaleIntercept = -1024
+        img[(ch-h)//2:(ch+h)//2,(cw-w)//2:(cw+w)//2] = new
+        img -= ref_dicom.RescaleIntercept
         img -= ref_dicom.RescaleIntercept
         img = img.astype(dt)           
         print("min {}, max {}, intercept {}".format(np.min(img),np.max(img),ref_dicom.RescaleIntercept))
@@ -106,7 +108,6 @@ class Dataset(dataset_mixin.DatasetMixin):
         uid[-2] = salt
         uidn = ".".join(uid)
         uid = ".".join(uid[:-1])
-
 #            ref_dicom[0x2,0x3].value=uidn  # Media SOP Instance UID                
         ref_dicom[0x8,0x18].value=uidn  #(0008, 0018) SOP Instance UID              
         ref_dicom[0x20,0xd].value=uid  #(0020, 000d) Study Instance UID       
@@ -117,5 +118,4 @@ class Dataset(dataset_mixin.DatasetMixin):
     def get_example(self, i):
         j,k = self.idx[i]
         img = self.dcms[j][(k-(self.ch-1)//2):(k+(self.ch+1)//2)]
-        h,w = self.crop
-        return random_crop(center_crop(img,(h+self.random, w+self.random)),self.crop).astype(self.dtype)
+        return random_crop(img,self.crop).astype(self.dtype)

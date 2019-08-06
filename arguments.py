@@ -27,9 +27,11 @@ def arguments():
                         help='period in epoch for lowering the learning rate')
     parser.add_argument('--epoch', '-e', type=int, default=None,
                         help='epoch')
+    parser.add_argument('--iteration', type=int, default=None,
+                        help='number of iterations')
     parser.add_argument('--snapinterval', '-si', type=int, default=-1, 
                         help='take snapshot every this epoch')
-    parser.add_argument('--weight_decay', '-wd', type=float, default=1e-8,
+    parser.add_argument('--weight_decay', '-wd', type=float, default=0, #1e-8
                         help='weight decay for regularization')
     parser.add_argument('--optimizer', '-op',choices=optim.keys(),default='Adam',
                         help='select optimizer')
@@ -46,9 +48,11 @@ def arguments():
     parser.add_argument('--dtype', '-dt', choices=dtypes.keys(), default='fp32',
                         help='floating point precision')
     parser.add_argument('--eqconv', '-eq', action='store_true',
-                        help='Equalised Convolution')
+                        help='Enable Equalised Convolution')
     parser.add_argument('--spconv', '-sp', action='store_true',
-                        help='Separable Convolution')
+                        help='Enable Separable Convolution')
+    parser.add_argument('--senet', '-se', action='store_true',
+                        help='Enable Squeeze-and-Excitation mechanism')
 
     # options for converter
     parser.add_argument('--output_analysis', '-oa', action='store_true',
@@ -91,9 +95,7 @@ def arguments():
                         choices=norm_layer)
     parser.add_argument('--dis_reg_weighting', '-dw', type=float, default=0,
                         help='regularisation of weighted discriminator. Set 0 to disable weighting')
-    parser.add_argument('--n_critics', '-nc', type=int, default=1,
-                        help='(not recommended; instead, use different learning rate for dis and gen) discriminator is trained this times during a single training of generators')
-    parser.add_argument('--wgan', action='store_true',help='WGAN-GP')
+    parser.add_argument('--dis_wgan', action='store_true',help='WGAN-GP')
 
     # generator: G: A -> B, F: B -> A
     parser.add_argument('--gen_activation', '-ga', default='relu', choices=activation_func.keys())
@@ -121,8 +123,10 @@ def arguments():
                         help='dropout ratio for generator')
     parser.add_argument('--gen_norm', '-gn', default='instance',
                         choices=norm_layer)
-    parser.add_argument('--unet', '-u', default='concat', choices=unettype,
+    parser.add_argument('--unet', '-u', default='conv', choices=unettype,
                         help='use u-net skip connections for generator')
+    parser.add_argument('--single_encoder', '-senc', action='store_true',
+                        help='use the same encoder enc_x = enc_y for both domains')
     parser.add_argument('--gen_start', type=int, default=0,
                         help='start using discriminator for generator training after this number of iterations')
     parser.add_argument('--report_start', type=int, default=1000,
@@ -163,8 +167,6 @@ def arguments():
                         help='weight for regularisation for encoders')
     parser.add_argument('--lambda_dis_z', '-lz', type=float, default=0,
                         help='weight for discriminator for the latent variable')
-    parser.add_argument('--single_encoder', '-se', action='store_true',
-                        help='use the same encoder enc_x = enc_y for both domains')
     parser.add_argument('--tv_tau', '-tt', type=float, default=1e-3,
                         help='smoothing parameter for total variation')
     parser.add_argument('--tv_method', '-tm', default='abs', choices=['abs','sobel','usual'],
@@ -175,7 +177,7 @@ def arguments():
                         help='number of images in A to visualise after each epoch')
     parser.add_argument('--nvis_B', type=int, default=3,
                         help='number of images in B to visualise after each epoch')
-    parser.add_argument('--vis_freq', '-vf', type=int, default=1000,
+    parser.add_argument('--vis_freq', '-vf', type=int, default=None,
                         help='visualisation frequency in iteration')
 
 

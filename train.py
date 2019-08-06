@@ -63,6 +63,9 @@ def main():
         path=os.path.join(args.root, 'testB'), args=args, random=0, forceSpacing=args.forceSpacing)
 
     args.ch = train_A_dataset.ch
+    args.out_ch = train_B_dataset.ch
+    print("channels in A {}, channels in B {}".format(args.ch,args.out_ch))
+
     test_A_iter = chainer.iterators.SerialIterator(test_A_dataset, args.nvis_A, shuffle=False)
     test_B_iter = chainer.iterators.SerialIterator(test_B_dataset, args.nvis_B, shuffle=False)
 
@@ -112,6 +115,8 @@ def main():
     def make_optimizer(model, lr, opttype='Adam'):
 #        eps = 1e-5 if args.dtype==np.float16 else 1e-8
         optimizer = optim[opttype](lr)
+        #from profiled_optimizer import create_marked_profile_optimizer
+#        optimizer = create_marked_profile_optimizer(optim[opttype](lr), sync=True, sync_level=2)
         if args.weight_decay>0:
             if opttype in ['Adam','AdaBound','Eve']:
                 optimizer.weight_decay_rate = args.weight_decay
@@ -164,11 +169,15 @@ def main():
     
     # Set up a trainer
     print("Preparing trainer...")
-    trainer = training.Trainer(updater, (args.lrdecay_start + args.lrdecay_period, 'epoch'), out=out)
+    if args.iteration:
+        stop_trigger = (args.iteration, 'iteration')
+    else:
+        stop_trigger = (args.lrdecay_start + args.lrdecay_period, 'epoch')
+    trainer = training.Trainer(updater, stop_trigger, out=out)
     for e in models:
         trainer.extend(extensions.snapshot_object(
             models[e], e+'{.updater.epoch}.npz'), trigger=model_save_interval)
-        trainer.extend(extensions.ParameterStatistics(models[e]))
+#        trainer.extend(extensions.ParameterStatistics(models[e]))   ## very slow
     for e in optimizers:
         trainer.extend(extensions.snapshot_object(
             optimizers[e], e+'{.updater.epoch}.npz'), trigger=model_save_interval)
@@ -186,7 +195,7 @@ def main():
         log_keys.extend(['opt_dec_x/loss_id','opt_dec_y/loss_id'])
     if args.dis_reg_weighting>0:
         log_keys_d.extend(['opt_x/loss_reg','opt_y/loss_reg','opt_z/loss_reg'])
-    if args.wgan:
+    if args.dis_wgan:
         log_keys_d.extend(['opt_x/loss_gp','opt_y/loss_gp','opt_z/loss_gp'])
 
     log_keys_all = log_keys+log_keys_d+log_keys_adv+log_keys_cycle
@@ -222,7 +231,7 @@ def main():
     vis_folder = os.path.join(out, "vis")
     os.makedirs(vis_folder, exist_ok=True)
     if not args.vis_freq:
-        args.vis_freq = len(train_d)//2        
+        args.vis_freq = len(train_A_dataset)//2        
     s = [k for k in range(args.num_slices)] if args.num_slices>0 and args.imgtype=="dcm" else None
     trainer.extend(VisEvaluator({"testA":test_A_iter, "testB":test_B_iter}, {"enc_x":enc_x, "enc_y":enc_y,"dec_x":dec_x,"dec_y":dec_y},
             params={'vis_out': vis_folder, 'slice':s}, device=args.gpu[0]),trigger=(args.vis_freq, 'iteration'))

@@ -1,14 +1,13 @@
 import os
-
 import chainer
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 from chainer import Variable,cuda
 import numpy as np
-import cupy as cp
-import functools
 import chainer.functions as F
 import losses
+from chainer.training import extensions
+import warnings
 
 # assume [0,1] input
 def postprocess(var):
@@ -16,9 +15,6 @@ def postprocess(var):
     img = (img + 1.0) / 2.0  # [0, 1)
     img = img.transpose(0, 2, 3, 1)
     return img
-
-from chainer.training import extensions
-from chainer import reporter as reporter_module
 
 class VisEvaluator(extensions.Evaluator):
     name = "myval"
@@ -32,6 +28,7 @@ class VisEvaluator(extensions.Evaluator):
         else:
             self.num_s = 1
         self.count = 0
+        warnings.filterwarnings("ignore", category=UserWarning)
 
     def evaluate(self):
         batch_x =  self._iterators['testA'].next()

@@ -6,11 +6,25 @@ import chainer.links as L
 import numpy as np
 from consts import activation_func, norm_layer
 
+class SEBlock(chainer.Chain):
+    def __init__(self,ch,r=16):
+        super(SEBlock, self).__init__()
+        with self.init_scope():
+            self.l1 = L.Linear(ch, ch//r)
+            self.l2 = L.Linear(ch//r, ch)
+
+    def __call__(self, x):
+        b,c,height,width = x.data.shape
+        h = F.average(x, axis=(2, 3))  # Global pooling
+        h = F.relu(self.l1(h))
+        h = F.sigmoid(self.l2(h))
+        return(F.transpose(F.broadcast_to(h, (height,width,b,c)), (2, 3, 0, 1)))
 ##
 class EqualizedConv2d(chainer.Chain):
-    def __init__(self, in_ch, out_ch, ksize, stride, pad, pad_type='zero', equalised=False, nobias=False,separable=False):
+    def __init__(self, in_ch, out_ch, ksize, stride, pad, pad_type='zero', equalised=False, nobias=False,separable=False, senet=False):
         self.equalised = equalised
         self.separable = separable
+        self.senet = senet
         self.pad_type = pad_type
         self.pad = pad
         if equalised:
@@ -26,6 +40,8 @@ class EqualizedConv2d(chainer.Chain):
                 self.pointwise = L.Convolution2D(in_ch, out_ch, 1, 1, initialW=w, nobias=nobias, initial_bias=bias)
             else:
                 self.c = L.Convolution2D(in_ch, out_ch, ksize, stride, initialW=w, nobias=nobias, initial_bias=bias)
+            if self.senet and out_ch>15:
+                self.se = SEBlock(out_ch)
     def __call__(self, x):
         if self.pad_type=='reflect':
             h = F.pad(x,[[0,0],[0,0],[self.pad,self.pad],[self.pad,self.pad]],mode='reflect')
@@ -36,8 +52,12 @@ class EqualizedConv2d(chainer.Chain):
             inv_c = np.sqrt(2.0/c)/self.ksize
             h = inv_c * h
         if self.separable:
-            return self.pointwise(self.depthwise(h))
-        return self.c(h)
+            h=self.pointwise(self.depthwise(h))
+        else:
+            h = self.c(h)
+        if hasattr(self,'se'):
+            h = h * self.se(h)
+        return h
 
 class EqualizedDeconv2d(chainer.Chain):
     def __init__(self, in_ch, out_ch, ksize, stride, pad, equalised=False, nobias=False,separable=False):
@@ -73,7 +93,7 @@ class EqualizedDeconv2d(chainer.Chain):
         return h
 
 ### the num of input channles should be divisible by 4
-# TODO: use F.depth2space
+# obsolite: use F.depth2space
 class PixelShuffler(chainer.Chain):
     def __init__(self, in_ch, out_ch, ksize, pad, nobias=False):
         w = chainer.initializers.HeNormal()
@@ -94,7 +114,6 @@ class ResBlock(chainer.Chain):
     def __init__(self, ch, norm='instance', activation='relu', equalised=False, separable=False, skip_conv=False):
         super(ResBlock, self).__init__()
         self.activation = activation_func[activation]
-        self.use_norm = False if norm=='none' else True
         nobias = True if 'batch' in norm or 'instance' in norm else False
         with self.init_scope():
             self.c0 = EqualizedConv2d(ch, ch, 3, 1, 1, pad_type='zero', equalised=equalised, nobias=nobias, separable=separable)
@@ -103,73 +122,73 @@ class ResBlock(chainer.Chain):
                 self.cs = EqualizedConv2d(ch, ch, 1, 1, 0)
             else:
                 self.cs = F.identity
-            if self.use_norm:
-                self.norm0 = norm_layer[norm](ch)
-                self.norm1 = norm_layer[norm](ch)
+            self.norm0 = norm_layer[norm](ch)
+            self.norm1 = norm_layer[norm](ch)
 
     def __call__(self, x):
         h = self.c0(x)
-        if self.use_norm:
-            h = self.norm0(h)
+        h = self.norm0(h)
         h = self.activation(h)
         h = self.c1(h)
-        if self.use_norm:
-            h = self.norm1(h)
+        h = self.norm1(h)
         return self.activation(h + self.cs(x))
 
 
 class CBR(chainer.Chain):
     def __init__(self, ch0, ch1, ksize=3, pad=1, norm='instance',
-                 sample='down', activation='relu', dropout=False, equalised=False, separable=False):
+                 sample='down', activation='relu', dropout=False, equalised=False, separable=False, senet=False):
         super(CBR, self).__init__()
         self.activation = activation_func[activation]
         self.dropout = dropout
         self.sample = sample
-        self.use_norm = False if norm=='none' else True
         nobias = True if 'batch' in norm or 'instance' in norm else False
+        if 'pixsh' in sample:
+            ch0 = int(ch0/4)
 
         with self.init_scope():
             if sample == 'down':
-                self.c = EqualizedConv2d(ch0, ch1, ksize, 2, pad, equalised=equalised, nobias=nobias, separable=separable)
+                self.c = EqualizedConv2d(ch0, ch1, ksize, 2, pad, equalised=equalised, nobias=nobias, separable=separable,senet=senet)
             elif sample == 'none-7':
-                self.c = EqualizedConv2d(ch0, ch1, 7, 1, 3, pad_type='reflect', equalised=equalised, nobias=nobias, separable=separable) 
+                self.c = EqualizedConv2d(ch0, ch1, 7, 1, 3, pad_type='reflect', equalised=equalised, nobias=nobias, separable=separable,senet=senet) 
             elif sample == 'deconv':
                 self.c = EqualizedDeconv2d(ch0, ch1, ksize, 2, pad, equalised=equalised, nobias=nobias, separable=separable)
-            elif sample == 'pixsh':
-                self.c = PixelShuffler(ch0, ch1, ksize, pad, nobias=nobias)
-            else:
-                self.c = EqualizedConv2d(ch0, ch1, ksize, 1, pad, equalised=equalised, nobias=nobias, separable=separable)
-            if self.use_norm:
-                self.norm = norm_layer[norm](ch1)
+            else: ## maxpool,avgpool,resize,unpool
+                self.c = EqualizedConv2d(ch0, ch1, ksize, 1, pad, equalised=equalised, nobias=nobias, separable=separable,senet=senet)
+            self.norm = norm_layer[norm](ch1)
             if '_res' in sample:
-                if self.use_norm:
-                    self.norm0 = norm_layer[norm](ch1)
-                self.cr = EqualizedConv2d(ch1, ch1, ksize, 1, pad, equalised=equalised, nobias=nobias, separable=separable)
-                self.cskip = EqualizedConv2d(ch0, ch1, 1, 1, 0, equalised=equalised, nobias=False)
+                self.normr = norm_layer[norm](ch1)
+                self.cr = EqualizedConv2d(ch1, ch1, ksize, 1, pad, equalised=equalised, nobias=nobias, separable=separable,senet=senet)
+                self.cskip = EqualizedConv2d(ch0, ch1, 1, 1, 0, equalised=equalised, separable=True, nobias=False)
 
     def __call__(self, x):
         if self.sample in ['maxpool_res','avgpool_res']:
-            h = self.activation(self.norm0(self.c(x)))
-            h = self.norm(self.cr(h))
+            h = self.activation(self.norm(self.c(x)))
+            h = self.normr(self.cr(h))
             if self.sample == 'maxpool_res':
                 h = F.max_pooling_2d(h, 2, 2, 0)
                 h = h + F.max_pooling_2d(self.cskip(x), 2, 2, 0)
             elif self.sample == 'avgpool_res':
                 h = F.average_pooling_2d(h, 2, 2, 0)
                 h = h + F.average_pooling_2d(self.cskip(x), 2, 2, 0)                
-        elif self.sample == 'resize':
+        elif 'resize' in self.sample:
             H,W = x.data.shape[2:]
-            h = F.resize_images(x, (2*H,2*W))
-            h = self.norm(self.c(h))
-        elif self.sample == 'resize_res':
-            H,W = x.data.shape[2:]
-            h = F.resize_images(x, (2*H,2*W))
-            h0 = self.activation(self.norm0(self.c(h)))
-            h = self.cskip(h) + self.norm(self.cr(h0))
-        elif self.sample == 'unpool_res':
-            h = F.unpooling_2d(x, 2, 2, 0, cover_all=False)
-            h0 = self.activation(self.norm0(self.c(h)))
-            h = self.cskip(h) + self.norm(self.cr(h0))
+            h0 = F.resize_images(x, (2*H,2*W))
+            h = self.norm(self.c(h0))
+            if self.sample == 'resize_res':
+                h = self.activation(h)
+                h = self.cskip(h0) + self.normr(self.cr(h))
+        elif 'pixsh' in self.sample:
+            h0 = F.depth2space(x, 2)
+            h = self.norm(self.c(h0))
+            if self.sample == 'pixsh_res':
+                h = self.activation(h)
+                h = self.cskip(h0) + self.normr(self.cr(h))
+        elif 'unpool' in self.sample:
+            h0 = F.unpooling_2d(x, 2, 2, 0, cover_all=False)
+            h = self.norm(self.c(h0))
+            if self.sample == 'unpool_res':
+                h = self.activation(h)
+                h = self.cskip(h0) + self.normr(self.cr(h))
         else:
             if self.sample == 'maxpool':
                 h = self.c(x)
@@ -177,39 +196,31 @@ class CBR(chainer.Chain):
             elif self.sample == 'avgpool':
                 h = self.c(x)
                 h = F.average_pooling_2d(h, 2, 2, 0)
-            elif self.sample == 'unpool':
-                h = F.unpooling_2d(x, 2, 2, 0, cover_all=False)
-                h = self.c(h)
             else:
                 h = self.c(x)
-            if self.use_norm:
-                h = self.norm(h)
-            if self.dropout:
-                h = F.dropout(h, ratio=self.dropout)
+            h = self.norm(h)
+        if self.dropout:
+            h = F.dropout(h, ratio=self.dropout)
         if self.activation is not None:
             h = self.activation(h)
         return h
 
 class LBR(chainer.Chain):
-    def __init__(self, height, width, ch, norm='none',
-                 activation='tanh', dropout=False):
+    def __init__(self, height, width, ch, norm='none', activation='tanh', dropout=False):
         super(LBR, self).__init__()
         self.activation = activation_func[activation]
         nobias = True if 'batch' in norm or 'instance' in norm else False
         self.dropout = dropout
-        self.use_norm = False if norm=='none' else True
         self.ch = ch
         self.width = width
         self.height = height
         with self.init_scope():
             self.l0 = L.Linear(ch*height*width,ch*height*width, nobias=nobias)
-            if self.use_norm:
-                self.norm = norm_layer[norm](ch*height*width)
+            self.norm = norm_layer[norm](ch*height*width)
 
     def __call__(self, x):
         h = self.l0(x)
-        if self.use_norm:
-            h = self.norm(h)
+        h = self.norm(h)
         if self.dropout:
             h = F.dropout(h, ratio=self.dropout)
         if self.activation is not None:
@@ -230,7 +241,7 @@ class Encoder(chainer.Chain):
             for i in range(args.gen_fc):
                 setattr(self, 'l' + str(i), LBR(args.crop_height,args.crop_width,args.ch, activation=args.gen_fc_activation))
             # nn.ReflectionPad2d in original
-            self.c0 = CBR(None, self.chs[0], norm=args.gen_norm, sample=args.gen_sample, activation=args.gen_activation, equalised=args.eqconv)
+            self.c0 = CBR(args.ch, self.chs[0], norm=args.gen_norm, sample=args.gen_sample, activation=args.gen_activation, equalised=args.eqconv)
             for i in range(1,len(self.chs)):
                 setattr(self, 'd' + str(i), CBR(self.chs[i-1], self.chs[i], ksize=args.gen_ksize, norm=args.gen_norm, sample=args.gen_down, activation=args.gen_activation, dropout=args.gen_dropout, equalised=args.eqconv, separable=args.spconv))
             if self.unet=='conv':
@@ -328,7 +339,7 @@ class Generator(chainer.Chain):
         with self.init_scope():
             for i in range(args.gen_fc):
                 setattr(self, 'l' + str(i), LBR(args.crop_height,args.crop_width,args.ch, activation=args.gen_fc_activation))
-            self.c0 = CBR(None, self.chs[0], norm=args.gen_norm, sample=args.gen_sample, activation=args.gen_activation, equalised=args.eqconv, separable=args.spconv)
+            self.c0 = CBR(args.ch, self.chs[0], norm=args.gen_norm, sample=args.gen_sample, activation=args.gen_activation, equalised=args.eqconv, separable=args.spconv)
             for i in range(1,len(self.chs)):
                 setattr(self, 'd' + str(i), CBR(self.chs[i-1], self.chs[i], ksize=args.gen_ksize, norm=args.gen_norm, sample=args.gen_down, activation=args.gen_activation, dropout=args.gen_dropout, equalised=args.eqconv, separable=args.spconv))
             if self.unet=='conv':
@@ -379,25 +390,22 @@ class Discriminator(chainer.Chain):
         super(Discriminator, self).__init__()
         self.n_down_layers = args.dis_ndown
         self.activation = args.dis_activation
-        self.wgan = args.wgan
+        self.wgan = args.dis_wgan
         self.chs = args.dis_chs
         dis_out = 2 if args.dis_reg_weighting>0 else 1  ## weighted discriminator
         with self.init_scope():
             self.c0 = CBR(None, self.chs[0], ksize=args.dis_ksize, norm='none', 
-                          sample=args.dis_sample, activation=args.dis_activation,
-                          dropout=args.dis_dropout, equalised=args.eqconv) #separable=args.spconv)
-
+                          sample=args.dis_sample, activation=args.dis_activation,dropout=args.dis_dropout, equalised=args.eqconv,senet=args.senet) #separable=args.spconv)
             for i in range(1, len(self.chs)):
                 setattr(self, 'c' + str(i),
                         CBR(self.chs[i-1], self.chs[i], ksize=args.dis_ksize, norm=args.dis_norm,
-                            sample=args.dis_down, activation=args.dis_activation, dropout=args.dis_dropout, equalised=args.eqconv, separable=args.spconv))
-
-            self.csl = CBR(self.chs[-1], 2*self.chs[-1], ksize=args.dis_ksize, norm=args.dis_norm, sample='none', activation=args.dis_activation, dropout=args.dis_dropout, equalised=args.eqconv, separable=args.spconv)
+                            sample=args.dis_down, activation=args.dis_activation, dropout=args.dis_dropout, equalised=args.eqconv, separable=args.spconv, senet=args.senet))
+            self.csl = CBR(self.chs[-1], 2*self.chs[-1], ksize=args.dis_ksize, norm=args.dis_norm, sample='none', activation=args.dis_activation, dropout=args.dis_dropout, equalised=args.eqconv, separable=args.spconv, senet=args.senet)
             if self.wgan:
                 self.fc1 = L.Linear(None, 1024)
                 self.fc2 = L.Linear(None, 1)
             else:
-                self.cl = CBR(2*self.chs[-1], dis_out, ksize=args.dis_ksize, norm='none', sample='none', activation='none', dropout=False, equalised=args.eqconv, separable=args.spconv)
+                self.cl = CBR(2*self.chs[-1], dis_out, ksize=args.dis_ksize, norm='none', sample='none', activation='none', dropout=False, equalised=args.eqconv, separable=args.spconv, senet=args.senet)
 
     def __call__(self, x):
         h = self.c0(x)
