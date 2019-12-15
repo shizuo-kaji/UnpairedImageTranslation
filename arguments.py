@@ -70,7 +70,7 @@ def arguments():
     parser.add_argument('--HU_range', '-hur', type=int, default=700, help='the maximum HU value to be accounted for will be HU_base+HU_range')
     parser.add_argument('--slice_range', '-sr', type=float, nargs="*", default=None, help='')
     parser.add_argument('--forceSpacing', '-fs', type=float, default=-1,   # 0.7634, 
-                            help='rescale B to match the specified spacing')
+                            help='scale dicom to match the specified spacing')
     parser.add_argument('--num_slices', '-ns', type=int, default=1, help='number of slices stacked together')
 
     # discriminator

@@ -39,22 +39,54 @@ def add_noise(h, sigma):
     else:
         return h
 
-def loss_avg(x,y, ksize=3, norm='l2'):
+## contrastive loss of a batch
+def contrastive_loss(x,t, margin=0.2):
+    xp = x.xp
+    d = F.sum((F.expand_dims(x, axis=0)-F.expand_dims(x, axis=1))**2, axis=-1)
+    lb = (xp.expand_dims(t.array, axis=0) == xp.expand_dims(t.array, axis=1))
+    pos = F.expand_dims(d[lb], axis=1)
+    neg = F.expand_dims(d[xp.logical_not(lb)], axis=0)
+    return F.average(F.relu(pos - neg + margin))    
+
+## binary focal loss (x has to be [0,1])
+def sigmoid_focalloss(x, t, class_weight, gamma=2, eps=1e-7):
+    p = F.clip(x, x_min=eps, x_max=1-eps)
+    tf = t.astype(p.dtype)
+    p = tf * p + (1-tf) * (1-p)
+    w = class_weight[t]
+    return F.sum(-((1 - p) ** gamma) * w * F.log(p))
+
+## multi-class focal loss
+def softmax_focalloss(x, t, class_num=4, gamma=2, eps=1e-7):
+    p = F.clip(F.softmax(x), x_min=eps, x_max=1-eps)
+    q = -x.xp.eye(class_num)[t] * F.log(p)
+    return F.sum(q * ((1 - p) ** gamma))
+
+## discriminator CE loss for fake (all values should be zero)
+def cross_entropy_dis_fake(y_fake):
+    batchsize,_,w,h = y_fake.data.shape
+    return(F.sum(F.softplus(-y_fake)) / batchsize / w / h)
+
+## apply average filter and take difference
+def loss_avg(x,y, ksize=3, norm='l2', weight=None):
     if ksize>1:
         ax = F.average_pooling_2d(x,ksize,1,0)
         ay = F.average_pooling_2d(y,ksize,1,0)
     else:
         ax = x
         ay = y
-    if norm=='l1':
-        return F.mean_absolute_error(ax,ay)
+    if weight:
+        if norm=='l1':        
+            return F.average(F.absolute(ax-ay)*(weight*ay+1))
+        else:
+            return F.average(((ax-ay)**2)*(weight*ay+1))
     else:
-        return F.mean_squared_error(ax,ay)
+        if norm=='l1':        
+            return F.mean_absolute_error(ax,ay)
+        else:
+            return F.mean_squared_error(ax,ay)
 
-def loss_avg_d(diff, ksize=3):
-    a = F.average_pooling_2d(diff,ksize,1,0)
-    return(F.average(a**2))
-
+## apply pre-trained CNN and take difference
 def loss_perceptual(x,y,model,layer='conv4_2',grey=False):
     with chainer.using_config('train', False):
         if grey:
@@ -73,6 +105,7 @@ def loss_perceptual(x,y,model,layer='conv4_2',grey=False):
             loss = F.mean_squared_error(vx,vy)
     return(loss)
 
+## apply Sobel's filter and take difference
 def loss_grad(x, y, norm='l1'):
     xp = cuda.get_array_module(x.data)
     grad = xp.tile(xp.asarray([[[[1,0,-1],[2,0,-2],[1,0,-1]]]],dtype=x.dtype),(x.data.shape[1],1,1))
@@ -85,19 +118,13 @@ def loss_grad(x, y, norm='l1'):
     else:
         return F.mean_squared_error(dxx,dyx)+F.mean_squared_error(dxy,dyy)
 
-def loss_grad_d(diff):
-    xp = cuda.get_array_module(diff.data)
-    grad = xp.tile(xp.asarray([[[[1,0,-1],[2,0,-2],[1,0,-1]]]],dtype=diff.dtype),(diff.data.shape[1],1,1))
-    dx = F.convolution_2d(diff,grad)
-    dy = F.convolution_2d(diff,xp.transpose(grad,(0,1,3,2)))
-    return F.average(dx**2) + F.average(dy**2)
-
 # compare only pixels with x < threshold. Note x is fixed and y is variable
 def loss_comp_low(x,y,threshold,norm='l1'):
     if norm=='l1':
         return(F.sum( ( (x.array<threshold)^(y.array<threshold) ) * F.absolute(x-y)))
     else:
         return(F.sum( ( (x.array<threshold)^(y.array<threshold) ) * ((x-y)**2) ))
+
 
 def loss_func_comp(y, val, noise=0):
     xp = cuda.get_array_module(y.data)

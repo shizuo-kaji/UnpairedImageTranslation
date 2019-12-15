@@ -5,8 +5,8 @@ import glob
 
 from chainer.dataset import dataset_mixin
 import numpy as np
-from skimage.transform import rescale
-from chainercv.transforms import random_crop,center_crop
+#from skimage.transform import rescale
+from chainercv.transforms import random_crop,center_crop,resize
 from consts import dtypes
 
 class Dataset(dataset_mixin.DatasetMixin):
@@ -43,8 +43,8 @@ class Dataset(dataset_mixin.DatasetMixin):
                 ds.file_meta.TransferSyntaxUID = dicom.uid.ImplicitVRLittleEndian
                 # sort slices according to SliceLocation header
                 if hasattr(ds, 'SliceLocation'):
-                    # loc.append(float(ds.SliceLocation))
-                    loc.append(int(f[-7:-4])) # slice location from filename
+                    loc.append(float(ds.SliceLocation))
+                    #loc.append(int(f[-7:-4])) # slice location from filename
                     if args.slice_range:
                         if args.slice_range[0] < loc < args.slice_range[1]:
                             slices.append(ds)
@@ -58,10 +58,11 @@ class Dataset(dataset_mixin.DatasetMixin):
             # if the current dir contains at least one slice
             if len(s)>0:
                 volume = self.img2var(np.stack([slices[i].pixel_array.astype(self.dtype)+slices[i].RescaleIntercept for i in s]))
-                if self.forceSpacing>0:
-                    scaling = float(slices[0].PixelSpacing[0])/self.forceSpacing
-                    volume = rescale(volume,scaling,mode="reflect",preserve_range=True)
-        #            img = imresize(img,(int(img.shape[0]*self.scale), int(img.shape[1]**self.scale)), interp='bicubic')            
+#                if volume.shape[1]<512:
+#                    volume = resize(volume,(512,512))
+#                if self.forceSpacing>0:
+#                    scaling = self.forceSpacing/float(slices[0].PixelSpacing[0])
+#                    volume = rescale(volume,scaling,mode="reflect",preserve_range=True)
                 volume = center_crop(volume,(self.crop[0]+self.random, self.crop[1]+self.random))
                 self.dcms.append(volume)
                 self.names.append( [filenames[i] for i in s] )
@@ -86,7 +87,9 @@ class Dataset(dataset_mixin.DatasetMixin):
 
     def overwrite(self,new,i,salt):
         ref_dicom = dicom.dcmread(self.get_img_path(i), force=True)
-        ref_dicom.file_meta.TransferSyntaxUID = dicom.uid.ImplicitVRLittleEndian
+        ref_dicom.file_meta.TransferSyntaxUID = dicom.uid.ExplicitVRLittleEndian #dicom.uid.ImplicitVRLittleEndian
+        ref_dicom.is_little_endian = True
+        ref_dicom.is_implicit_VR = False
         dt=ref_dicom.pixel_array.dtype
         img = np.full(ref_dicom.pixel_array.shape, self.base, dtype=np.float32)
         ch,cw = img.shape
@@ -104,15 +107,16 @@ class Dataset(dataset_mixin.DatasetMixin):
         ## UID should be changed for dcm's under different dir
         #                uid=dicom.UID.generate_uid()
         #                uid = dicom.UID.UID(uid.name[:-len(args.suffix)]+args.suffix)
-        uid = ref_dicom[0x8,0x18].value.split(".")
-        uid[-2] = salt
+#        uid = ref_dicom[0x8,0x18].value.split(".")
+        uid = ref_dicom[0x20,0x52].value.split(".")  # Frame of Reference UID
+        uid[-1] = salt
         uidn = ".".join(uid)
-        uid = ".".join(uid[:-1])
-#            ref_dicom[0x2,0x3].value=uidn  # Media SOP Instance UID                
-        ref_dicom[0x8,0x18].value=uidn  #(0008, 0018) SOP Instance UID              
-        ref_dicom[0x20,0xd].value=uid  #(0020, 000d) Study Instance UID       
-        ref_dicom[0x20,0xe].value=uid  #(0020, 000e) Series Instance UID
-        ref_dicom[0x20,0x52].value=uid  # Frame of Reference UID
+#        uid = ".".join(uid[:-1])
+#        ref_dicom[0x2,0x3].value=uidn  # Media SOP Instance UID                
+        # ref_dicom[0x8,0x18].value=uidn  #(0008, 0018) SOP Instance UID              
+        # ref_dicom[0x20,0xd].value=uid  #(0020, 000d) Study Instance UID       
+        # ref_dicom[0x20,0xe].value=uid  #(0020, 000e) Series Instance UID
+        ref_dicom[0x20,0x52].value=uidn  # Frame of Reference UID
         return(ref_dicom)
 
     def get_example(self, i):

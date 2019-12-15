@@ -92,8 +92,8 @@ class EqualizedDeconv2d(chainer.Chain):
             h = F.pad(h,[[0,0],[0,0],[0,1],[0,1]],mode='reflect')
         return h
 
-### the num of input channles should be divisible by 4
-# obsolite: use F.depth2space
+### the num of input channels should be divisible by 4
+# obsolete: use F.depth2space
 class PixelShuffler(chainer.Chain):
     def __init__(self, in_ch, out_ch, ksize, pad, nobias=False):
         w = chainer.initializers.HeNormal()
@@ -135,15 +135,14 @@ class ResBlock(chainer.Chain):
 
 
 class CBR(chainer.Chain):
-    def __init__(self, ch0, ch1, ksize=3, pad=1, norm='instance',
-                 sample='down', activation='relu', dropout=False, equalised=False, separable=False, senet=False):
+    def __init__(self, ch00, ch1, ksize=3, pad=1, norm='instance',
+                 sample='down', activation='relu', dropout=False, equalised=False, separable=False, senet=False, skipconv=False):
         super(CBR, self).__init__()
         self.activation = activation_func[activation]
         self.dropout = dropout
         self.sample = sample
         nobias = True if 'batch' in norm or 'instance' in norm else False
-        if 'pixsh' in sample:
-            ch0 = int(ch0/4)
+        ch0 = ch00//4 if 'pixsh' in sample else ch00    
 
         with self.init_scope():
             if sample == 'down':
@@ -158,7 +157,10 @@ class CBR(chainer.Chain):
             if '_res' in sample:
                 self.normr = norm_layer[norm](ch1)
                 self.cr = EqualizedConv2d(ch1, ch1, ksize, 1, pad, equalised=equalised, nobias=nobias, separable=separable,senet=senet)
-                self.cskip = EqualizedConv2d(ch0, ch1, 1, 1, 0, equalised=equalised, separable=True, nobias=False)
+                if skipconv:
+                    self.cskip = EqualizedConv2d(ch0, ch1, 1, 1, 0, equalised=equalised, separable=True, nobias=False)
+                else:
+                    self.cskip = F.identity
 
     def __call__(self, x):
         if self.sample in ['maxpool_res','avgpool_res']:
@@ -349,7 +351,7 @@ class Generator(chainer.Chain):
                 setattr(self, 'r' + str(i), ResBlock(self.chs[-1], norm=args.gen_norm, activation=args.gen_activation, equalised=args.eqconv, separable=args.spconv))
             for i in range(1,len(self.chs)):
                 setattr(self, 'ua' + str(i), CBR(up_chs[-i], self.chs[-i-1], ksize=args.gen_ksize, norm=args.gen_norm, sample=args.gen_up, activation=args.gen_activation, dropout=args.gen_dropout, equalised=args.eqconv, separable=args.spconv))
-            setattr(self, 'ua'+str(len(self.chs)),CBR(up_chs[0], args.ch, norm='none', sample=args.gen_sample, activation=args.gen_out_activation, equalised=args.eqconv, separable=args.spconv))
+            setattr(self, 'ua'+str(len(self.chs)),CBR(up_chs[0], args.out_ch, norm='none', sample=args.gen_sample, activation=args.gen_out_activation, equalised=args.eqconv, separable=args.spconv))
 
     def __call__(self, x):
         h = x

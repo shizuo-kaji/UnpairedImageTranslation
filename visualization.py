@@ -65,7 +65,10 @@ class VisEvaluator(extensions.Evaluator):
                         ax.set_yticks([])
                 else:
                     ax = fig.add_subplot(gs[j,i])
-                    ax.imshow(imgs[j], interpolation='none',vmin=0,vmax=1)
+                    if(imgs[j].shape[2] == 1):
+                        ax.imshow(imgs[j][:,:,0], interpolation='none',cmap='gray',vmin=0,vmax=1)
+                    else:
+                        ax.imshow(imgs[j], interpolation='none',vmin=0,vmax=1)
                     ax.set_xticks([])
                     ax.set_yticks([])
 
@@ -91,7 +94,10 @@ class VisEvaluator(extensions.Evaluator):
                         ax.set_yticks([])
                 else:
                     ax = fig.add_subplot(gs[j+len(batch_x),i])
-                    ax.imshow(imgs[j], interpolation='none',vmin=0,vmax=1)
+                    if(imgs[j].shape[2] == 1):
+                        ax.imshow(imgs[j][:,:,0], interpolation='none',cmap='gray',vmin=0,vmax=1)
+                    else:
+                        ax.imshow(imgs[j], interpolation='none',vmin=0,vmax=1)
                     ax.set_xticks([])
                     ax.set_yticks([])
 
