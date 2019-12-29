@@ -10,14 +10,13 @@ from chainercv.transforms import random_crop,center_crop,resize
 from consts import dtypes
 
 class Dataset(dataset_mixin.DatasetMixin):
-    def __init__(self, path, args, random=0, forceSpacing=0):
+    def __init__(self, path, args, random=0):
         self.path = path
         self.base = args.HU_base
         self.range = args.HU_range
         self.random = random
-        self.crop = (args.crop_height,args.crop_width)
         self.ch = args.num_slices
-        self.forceSpacing = forceSpacing
+        self.forceSpacing = args.forceSpacing
         self.dtype = dtypes[args.dtype]
         self.imgtype=args.imgtype
         self.dcms = []
@@ -26,12 +25,14 @@ class Dataset(dataset_mixin.DatasetMixin):
 
         if not args.crop_height:
             self.crop = (384,480)  ## default for the CBCT dataset
-        print("Load Dataset from disk: {}".format(path))
+        else:
+            self.crop = (args.crop_height,args.crop_width)
+
+        print("Loading Dataset from: {}".format(path))
         dirlist = [path]
         for f in os.listdir(path):
             if os.path.isdir(os.path.join(path, f)):
                 dirlist.append(os.path.join(path,f))
-        skipcount = 0
         j = 0  # dir index
         for dirname in sorted(dirlist):
             files = [os.path.join(dirname, fname) for fname in sorted(os.listdir(dirname)) if fname.endswith(args.imgtype)]
@@ -42,34 +43,38 @@ class Dataset(dataset_mixin.DatasetMixin):
                 ds = dicom.dcmread(f, force=True)
                 ds.file_meta.TransferSyntaxUID = dicom.uid.ImplicitVRLittleEndian
                 # sort slices according to SliceLocation header
-                if hasattr(ds, 'SliceLocation'):
-                    loc.append(float(ds.SliceLocation))
-                    #loc.append(int(f[-7:-4])) # slice location from filename
-                    if args.slice_range:
-                        if args.slice_range[0] < loc < args.slice_range[1]:
-                            slices.append(ds)
-                            filenames.append(f)
-                    else:
+                if hasattr(ds, 'ImagePositionPatient') and args.slice_range: # Thanks to johnrickman for letting me know to use this DICOM entry
+#                if hasattr(ds, 'SliceLocation'):
+                    z = float(ds.ImagePositionPatient[2])
+                    if (args.slice_range[0] < z < args.slice_range[1]):
                         slices.append(ds)
                         filenames.append(f)
+                        loc.append(z)   # sort by z-coord
                 else:
-                    skipcount = skipcount + 1
+                    slices.append(ds)
+                    filenames.append(f)
+                    loc.append(f)  # sort by filename
             s = sorted(range(len(slices)), key=lambda k: loc[k])
+
             # if the current dir contains at least one slice
             if len(s)>0:
-                volume = self.img2var(np.stack([slices[i].pixel_array.astype(self.dtype)+slices[i].RescaleIntercept for i in s]))
-#                if volume.shape[1]<512:
-#                    volume = resize(volume,(512,512))
-#                if self.forceSpacing>0:
-#                    scaling = self.forceSpacing/float(slices[0].PixelSpacing[0])
-#                    volume = rescale(volume,scaling,mode="reflect",preserve_range=True)
+                vollist = []
+                for i in s:
+                    sl = slices[i].pixel_array.astype(self.dtype)+slices[i].RescaleIntercept
+                    if self.forceSpacing>0:
+                        scaling = self.forceSpacing/float(slices[i].PixelSpacing[0])
+                        sl = resize(sl[np.newaxis,],(int(scaling*sl.shape[0]),int(scaling*sl.shape[1])))[0]
+#                        volume = rescale(sl,scaling,mode="reflect",preserve_range=True)
+                    vollist.append(sl)
+                volume = self.img2var(np.stack(vollist))   # shape = (z,x,y)
+                print("Loaded volume of size {}".format(volume.shape))
                 volume = center_crop(volume,(self.crop[0]+self.random, self.crop[1]+self.random))
                 self.dcms.append(volume)
                 self.names.append( [filenames[i] for i in s] )
                 self.idx.extend([(j,k) for k in range((self.ch-1)//2,len(slices)-self.ch//2)])
                 j = j + 1
 
-        print("#dir {}, #file {}, #skipped {}".format(len(dirlist),len(self.idx),skipcount))
+        print("#dir {}, #file {}, #slices {}".format(len(dirlist),len(self.idx),sum([len(fd) for fd in filenames])))
         
     def __len__(self):
         return len(self.idx)
@@ -79,10 +84,11 @@ class Dataset(dataset_mixin.DatasetMixin):
         return self.names[j][k]
 
     def img2var(self,img):
-        # cut off mask [-1,1] or [0,1] output
+        # output clipped and scaled to [-1,1]
         return(2*(np.clip(img,self.base,self.base+self.range)-self.base)/self.range-1.0)
     
     def var2img(self,var):
+        # inverse of img2var
         return(0.5*(1.0+var)*self.range + self.base)
 
     def overwrite(self,new,i,salt):

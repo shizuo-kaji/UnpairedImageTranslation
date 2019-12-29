@@ -54,13 +54,13 @@ def main():
     ## dataset iterator
     print("Setting up data iterators...")
     train_A_dataset = Dataset(
-        path=os.path.join(args.root, 'trainA'), args=args, random=args.random_translate, forceSpacing=0)
+        path=os.path.join(args.root, 'trainA'), args=args, random=args.random_translate)
     train_B_dataset = Dataset(
-        path=os.path.join(args.root, 'trainB'), args=args, random=args.random_translate, forceSpacing=args.forceSpacing)
+        path=os.path.join(args.root, 'trainB'), args=args, random=args.random_translate)
     test_A_dataset = Dataset(
-        path=os.path.join(args.root, 'testA'), args=args, random=0, forceSpacing=0)
+        path=os.path.join(args.root, 'testA'), args=args, random=0)
     test_B_dataset = Dataset(
-        path=os.path.join(args.root, 'testB'), args=args, random=0, forceSpacing=args.forceSpacing)
+        path=os.path.join(args.root, 'testB'), args=args, random=0)
 
     args.ch = train_A_dataset.ch
     args.out_ch = train_B_dataset.ch

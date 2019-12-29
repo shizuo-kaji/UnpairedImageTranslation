@@ -14,24 +14,23 @@ from consts import dtypes
 
 ## load images everytime from disk: slower but low memory usage
 class DatasetOutMem(dataset_mixin.DatasetMixin):
-    def __init__(self, path, args, random=0, forceSpacing=0):
+    def __init__(self, path, args, random=0):
         self.path = path
         self.names = []
         self.random = random
-        self.color=True
+        self.color=not args.grey
         self.ch = 3 if self.color else 1
         self.imgtype=args.imgtype
         self.dtype = dtypes[args.dtype]
         for fn in glob.glob(os.path.join(self.path,"**/*.{}".format(self.imgtype)), recursive=True):
             self.names.append(fn)
-        if not args.crop_height or not args.crop_width:
-            img = read_image(self.names[0])
-            self.crop = ( 16*((img.shape[1]-args.random_translate)//16), 16*((img.shape[2]-args.random_translate)//16) )
-        else:
+        if args.crop_height and args.crop_width:
             self.crop = (args.crop_height,args.crop_width)
+        else:
+            self.crop=None
         self.names = sorted(self.names)
         print("Cropped to: ",self.crop)
-        print("Loaded: {} images".format(len(self.names)))
+        print("Loaded: {} images from {}".format(len(self.names),path))
 
     def __len__(self):
         return len(self.names)
@@ -46,7 +45,11 @@ class DatasetOutMem(dataset_mixin.DatasetMixin):
         img = read_image(self.get_img_path(i),color=self.color)
         img = img * 2 / 255.0 - 1.0  # [-1, 1)
 #        img = resize(img, (self.resize_to, self.resize_to))
-        img = random_crop(center_crop(img, (self.crop[0]+self.random,self.crop[1]+self.random)),self.crop)
+        if self.crop:
+            H, W = self.crop
+        else:
+            H, W = ( 16*((img.shape[1]-2*self.random)//16), 16*((img.shape[2]-2*self.random)//16) )
+        img = random_crop(center_crop(img, (H+2*self.random,W+2*self.random)),(H,W))
         if self.random:
             img = random_flip(img, x_random=True)
         return img.astype(self.dtype)
