@@ -59,7 +59,7 @@ if __name__ == '__main__':
         with open(args.argfile, 'r') as f:
             larg = json.load(f)
             root=os.path.dirname(args.argfile)
-            for x in ['HU_base','HU_range','forceSpacing','perceptual_layer','num_slices',
+            for x in ['HU_base','HU_range','forceSpacing','perceptual_layer','num_slices','out_ch',
               'dis_norm','dis_activation','dis_chs','dis_ksize','dis_sample','dis_down','dis_reg_weighting','dis_wgan',
               'gen_norm','gen_activation','gen_out_activation','gen_nblock','gen_chs','gen_sample','gen_down','gen_up','gen_ksize','unet',
               'gen_fc','gen_fc_activation','spconv','eqconv','senet','dtype']:
@@ -85,7 +85,7 @@ if __name__ == '__main__':
     else:
         from dataset_jpg import DatasetOutMem as Dataset   
 
-    dataset = Dataset(path=args.root, args=args, random=0, forceSpacing=0)
+    dataset = Dataset(path=args.root, args=args, random=0)
     args.ch = dataset.ch
 #    iterator = chainer.iterators.MultiprocessIterator(dataset, args.batch_size, n_processes=3, repeat=False, shuffle=False)
     iterator = chainer.iterators.MultithreadIterator(dataset, args.batch_size, n_threads=3, repeat=False, shuffle=False)   ## best performance
