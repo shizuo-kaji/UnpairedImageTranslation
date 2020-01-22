@@ -113,10 +113,3 @@ class VisEvaluator(extensions.Evaluator):
 
         result = {"myval/cycle_y_l1":cycle_y_l1, "myval/cycle_x_l1":cycle_x_l1}
         return result
-
-## obsolete
-def visualize(models,test_image_folder, test_A_iter, test_B_iter):
-    @chainer.training.make_extension()
-    def visualization(trainer):
-        updater = trainer.updater
-    return visualization

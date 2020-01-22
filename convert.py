@@ -81,9 +81,14 @@ if __name__ == '__main__':
 
     ## load images
     if args.imgtype=="dcm":
-        from dataset_dicom import Dataset as Dataset 
+        from dataset_dicom import Dataset as Dataset
+        args.grey = True
     else:
         from dataset_jpg import DatasetOutMem as Dataset   
+
+    ## compatibility
+    if not hasattr(args,'out_ch'):
+        args.out_ch = 1 if args.grey else 3
 
     dataset = Dataset(path=args.root, args=args, random=0)
     args.ch = dataset.ch

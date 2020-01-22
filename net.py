@@ -288,10 +288,10 @@ class Decoder(chainer.Chain):
             self.unet = 'none'
         if self.unet=='concat':
             up_chs = [2*self.chs[i] for i in range(len(self.chs))]
-        elif self.unet in ['add','none']:
-            up_chs = self.chs
         elif self.unet=='conv':
-            up_chs = [self.chs[i]+4 for i in range(len(self.chs))]                
+            up_chs = [self.chs[i]+4 for i in range(len(self.chs))]
+        else:    # ['add','none']:
+            up_chs = self.chs
         if hasattr(args,'noise_z'):
             self.noise_z = args.noise_z
         else:
@@ -329,10 +329,10 @@ class Generator(chainer.Chain):
             self.unet = 'none'
         if self.unet=='concat':
             up_chs = [2*self.chs[i] for i in range(len(self.chs))]
-        elif self.unet in ['add','none']:
-            up_chs = self.chs
         elif self.unet=='conv':
             up_chs = [self.chs[i]+4 for i in range(len(self.chs))]                
+        else:    # ['add','none']:
+            up_chs = self.chs
         if hasattr(args,'noise_z'):
             self.noise_z = args.noise_z
         else:

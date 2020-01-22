@@ -38,17 +38,28 @@ class DatasetOutMem(dataset_mixin.DatasetMixin):
     def get_img_path(self, i):
         return(self.names[i])
 
-    def var2img(self,var):
-        return(0.5*(1.0+var)*255)
+    def var2img(self,var):  # [-1,1] => [0,255]
+        return((1.0+var)*127.5)
+
+    def img2var(self,img):  # [0,255] => [-1,1]
+        return(img/127.5 - 1.0)
 
     def get_example(self, i):
-        img = read_image(self.get_img_path(i),color=self.color)
-        img = img * 2 / 255.0 - 1.0  # [-1, 1)
+        if self.imgtype == "npy":
+            img = np.load(self.get_img_path(i))
+            if len(img.shape) == 2:
+                img = img[np.newaxis,]
+        else:
+            img = self.img2var(read_image(self.get_img_path(i),color=self.color))
+        
 #        img = resize(img, (self.resize_to, self.resize_to))
         if self.crop:
             H, W = self.crop
         else:
             H, W = ( 16*((img.shape[1]-2*self.random)//16), 16*((img.shape[2]-2*self.random)//16) )
+        if img.shape[1]<H+2*self.random or img.shape[2] < W+2*self.random:
+            p = max(H+2*self.random-img.shape[1],W+2*self.random-img.shape[2])
+            img = np.pad(img,((0,0),(p,p),(p,p)),'edge')
         img = random_crop(center_crop(img, (H+2*self.random,W+2*self.random)),(H,W))
         if self.random:
             img = random_flip(img, x_random=True)
@@ -68,5 +79,4 @@ class DatasetOutMem(dataset_mixin.DatasetMixin):
         else:
             img = img.transpose((2, 0, 1))[:3,:,:]
         img = img * mask
-        img = img * 2 / 255.0 - 1.0  # [-1, 1)
-        return img
+        return img2var(img)

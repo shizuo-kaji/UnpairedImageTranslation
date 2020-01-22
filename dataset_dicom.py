@@ -43,7 +43,7 @@ class Dataset(dataset_mixin.DatasetMixin):
                 ds = dicom.dcmread(f, force=True)
                 ds.file_meta.TransferSyntaxUID = dicom.uid.ImplicitVRLittleEndian
                 # sort slices according to SliceLocation header
-                if hasattr(ds, 'ImagePositionPatient') and args.slice_range: # Thanks to johnrickman for letting me know to use this DICOM entry
+                if hasattr(ds, 'ImagePositionPatient') and (args.slice_range is not None): # Thanks to johnrickman for letting me know to use this DICOM entry
 #                if hasattr(ds, 'SliceLocation'):
                     z = float(ds.ImagePositionPatient[2])
                     if (args.slice_range[0] < z < args.slice_range[1]):
@@ -104,7 +104,6 @@ class Dataset(dataset_mixin.DatasetMixin):
 #        if np.min(img - ref_dicom.RescaleIntercept)<0:
 #            ref_dicom.RescaleIntercept = -1024
         img[(ch-h)//2:(ch+h)//2,(cw-w)//2:(cw+w)//2] = new
-        img -= ref_dicom.RescaleIntercept
         img -= ref_dicom.RescaleIntercept
         img = img.astype(dt)           
         print("min {}, max {}, intercept {}".format(np.min(img),np.max(img),ref_dicom.RescaleIntercept))

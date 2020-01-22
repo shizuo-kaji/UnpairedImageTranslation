@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-## TODO: detect failure from mismatch between channels
+## TODO: detect failure from mismatch between channels(adjacent slices)
 import os
 from datetime import datetime as dt
 import numpy as np
@@ -15,7 +15,8 @@ from chainerui.utils import save_args
 from chainer.dataset import convert
 import chainer.functions as F
 
-import net
+from net import Discriminator,Encoder,Decoder
+#from net_dp import Encoder,Decoder
 from arguments import arguments 
 from updater import Updater
 from visualization import VisEvaluator
@@ -24,9 +25,6 @@ from consts import dtypes,optim
 def main():
     args = arguments()
     out = os.path.join(args.out, dt.now().strftime('%m%d_%H%M'))
-    print(args)
-    print("\nresults are saved under: ",out)
-    save_args(args, out)
 
     if args.imgtype=="dcm":
         from dataset_dicom import Dataset as Dataset 
@@ -64,7 +62,11 @@ def main():
 
     args.ch = train_A_dataset.ch
     args.out_ch = train_B_dataset.ch
+
+    print(args)
+    print("\nresults are saved under: ",out)
     print("channels in A {}, channels in B {}".format(args.ch,args.out_ch))
+    save_args(args, out)
 
     test_A_iter = chainer.iterators.SerialIterator(test_A_dataset, args.nvis_A, shuffle=False)
     test_B_iter = chainer.iterators.SerialIterator(test_B_dataset, args.nvis_B, shuffle=False)
@@ -82,13 +84,13 @@ def main():
             train_B_dataset, args.batch_size)
 
     # setup models
-    enc_x = net.Encoder(args)
-    enc_y = enc_x if args.single_encoder else net.Encoder(args)
-    dec_x = net.Decoder(args)
-    dec_y = net.Decoder(args)
-    dis_x = net.Discriminator(args)
-    dis_y = net.Discriminator(args)
-    dis_z = net.Discriminator(args) if args.lambda_dis_z>0 else chainer.links.Linear(1,1)
+    enc_x = Encoder(args)
+    enc_y = enc_x if args.single_encoder else Encoder(args)
+    dec_x = Decoder(args)
+    dec_y = Decoder(args)
+    dis_x = Discriminator(args)
+    dis_y = Discriminator(args)
+    dis_z = Discriminator(args) if args.lambda_dis_z>0 else chainer.links.Linear(1,1)
     models = {'enc_x': enc_x, 'dec_x': dec_x, 'enc_y': enc_y, 'dec_y': dec_y, 'dis_x': dis_x, 'dis_y': dis_y, 'dis_z': dis_z}
 
     ## load learnt models
