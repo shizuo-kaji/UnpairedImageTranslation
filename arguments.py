@@ -1,7 +1,7 @@
 import argparse
 import numpy as np
 import chainer.functions as F
-from consts import activation_func,dtypes,uplayer,downlayer,norm_layer,unettype,optim
+from consts import activation_func,dtypes,norm_layer,unettype,optim
 
 
 def arguments():
@@ -13,13 +13,13 @@ def arguments():
     parser.add_argument('--out', '-o', default='result',
                         help='Directory to output the result')
     parser.add_argument('--argfile', '-a', help="specify args file to load settings from")
-    parser.add_argument('--imgtype', '-it', default="jpg", help="image file type (file extension)")
+    parser.add_argument('--imgtype', '-it', default="dcm", help="image file type (file extension)")
 
     parser.add_argument('--learning_rate', '-lr', type=float, default=None,
                         help='Learning rate')
     parser.add_argument('--learning_rate_g', '-lrg', type=float, default=2e-4,
                         help='Learning rate for generator')
-    parser.add_argument('--learning_rate_d', '-lrd', type=float, default=1e-4,
+    parser.add_argument('--learning_rate_d', '-lrd', type=float, default=1e-4,    #2e-4
                         help='Learning rate for discriminator')
     parser.add_argument('--lrdecay_start', '-e1', type=int, default=25,
                         help='start lowering the learning rate (in epoch)')
@@ -66,8 +66,10 @@ def arguments():
                         help='strength of noise injection for the latent variable')
 
     ## DICOM specific
-    parser.add_argument('--HU_base', '-hub', type=int, default=-500, help='minimum HU value to be accounted for')
-    parser.add_argument('--HU_range', '-hur', type=int, default=700, help='the maximum HU value to be accounted for will be HU_base+HU_range')
+    parser.add_argument('--HU_baseA', '-huba', type=int, default=-500, help='minimum HU value to be accounted for')
+    parser.add_argument('--HU_rangeA', '-hura', type=int, default=700, help='the maximum HU value to be accounted for will be HU_base+HU_range')
+    parser.add_argument('--HU_baseB', '-hubb', type=int, default=-500, help='minimum HU value to be accounted for')
+    parser.add_argument('--HU_rangeB', '-hurb', type=int, default=700, help='the maximum HU value to be accounted for will be HU_base+HU_range')
     parser.add_argument('--slice_range', '-sr', type=float, nargs="*", default=None, help='z-coords of slices used')
     parser.add_argument('--forceSpacing', '-fs', type=float, default=-1,   # 0.7634, 
                             help='scale dicom to match the specified spacing')
@@ -75,6 +77,7 @@ def arguments():
 
     # discriminator
     parser.add_argument('--dis_activation', '-da', default='lrelu', choices=activation_func.keys())
+    parser.add_argument('--dis_out_activation', '-do', default='none', choices=activation_func.keys())
     parser.add_argument('--dis_chs', '-dc', type=int, nargs="*", default=None,
                         help='Number of channels in down layers in discriminator')
     parser.add_argument('--dis_basech', '-db', type=int, default=64,
@@ -83,7 +86,7 @@ def arguments():
                         help='number of down layers in discriminator')
     parser.add_argument('--dis_ksize', '-dk', type=int, default=4,
                         help='kernel size for patchGAN discriminator')
-    parser.add_argument('--dis_down', '-dd', default='down', choices=downlayer,  ## default down
+    parser.add_argument('--dis_down', '-dd', default='down', 
                         help='type of down layers in discriminator')
     parser.add_argument('--dis_sample', '-ds', default='down', 
                         help='type of first conv layer for patchGAN discriminator')
@@ -95,7 +98,8 @@ def arguments():
                         choices=norm_layer)
     parser.add_argument('--dis_reg_weighting', '-dw', type=float, default=0,
                         help='regularisation of weighted discriminator. Set 0 to disable weighting')
-    parser.add_argument('--dis_wgan', action='store_true',help='WGAN-GP')
+    parser.add_argument('--dis_wgan', '-wgan', action='store_true',help='WGAN-GP')
+    parser.add_argument('--dis_attention', action='store_true',help='attention mechanism for discriminator')
 
     # generator: G: A -> B, F: B -> A
     parser.add_argument('--gen_activation', '-ga', default='relu', choices=activation_func.keys())
@@ -115,22 +119,23 @@ def arguments():
                         help='kernel size for generator')
     parser.add_argument('--gen_sample', '-gs', default='none-7',
                         help='first and last conv layers for generator')
-    parser.add_argument('--gen_down', '-gd', default='down', choices=downlayer,
+    parser.add_argument('--gen_down', '-gd', default='down',
                         help='down layers in generator')
-    parser.add_argument('--gen_up', '-gu', default='resize', choices=uplayer,
+    parser.add_argument('--gen_up', '-gu', default='resize',
                         help='up layers in generator')
     parser.add_argument('--gen_dropout', '-gdo', type=float, default=None, 
                         help='dropout ratio for generator')
     parser.add_argument('--gen_norm', '-gn', default='instance',
                         choices=norm_layer)
-    parser.add_argument('--unet', '-u', default='conv', choices=unettype,
+    parser.add_argument('--unet', '-u', default='none', choices=unettype,
                         help='use u-net skip connections for generator')
+    parser.add_argument('--skipdim', '-sd', type=int, default=4,
+                        help='channel number for skip connections')
+    parser.add_argument('--latent_dim', default=-1, type=int,
+                        help='dimension of the latent space between encoder and decoder')
+
     parser.add_argument('--single_encoder', '-senc', action='store_true',
                         help='use the same encoder enc_x = enc_y for both domains')
-    parser.add_argument('--gen_start', type=int, default=0,
-                        help='start using discriminator for generator training after this number of iterations')
-    parser.add_argument('--report_start', type=int, default=1000,
-                        help='start reporting losses after this number of iterations')
 
     ## loss function
     parser.add_argument('--lambda_A', '-lcA', type=float, default=10.0,
@@ -145,13 +150,13 @@ def arguments():
                         help='lambda for perceptual loss for A -> B')
     parser.add_argument('--lambda_identity_y', '-liy', type=float, default=0,
                         help='lambda for perceptual loss for B -> A')
-    parser.add_argument('--perceptual_layer', '-pl', type=str, default="conv4_2",
+    parser.add_argument('--perceptual_layer', '-pl', type=str, default="conv1_2",   # con4_2, pool1
                         help='The name of the layer of VGG16 used for perceptual loss')
     parser.add_argument('--lambda_grad', '-lg', type=float, default=0,
                         help='lambda for gradient loss')
     parser.add_argument('--lambda_air', '-la', type=float, default=0,
                         help='lambda for air comparison loss')
-    parser.add_argument('--lambda_domain', '-ld', type=float, default=0,
+    parser.add_argument('--lambda_domain', '-ld', type=float, default=1,
                         help='lambda for domain preservation: G (resp. F) restricted on A (resp. B) should be Id')
     parser.add_argument('--lambda_idempotence', '-lidm', type=float, default=0,
                         help='lambda for idempotence: G^2=F^2=Id')
@@ -173,12 +178,14 @@ def arguments():
                         help='method of calculating total variation')
 
     ## visualisation during training
-    parser.add_argument('--nvis_A', type=int, default=3,
+    parser.add_argument('--nvis_A', type=int, default=6,
                         help='number of images in A to visualise after each epoch')
-    parser.add_argument('--nvis_B', type=int, default=3,
+    parser.add_argument('--nvis_B', type=int, default=1,
                         help='number of images in B to visualise after each epoch')
     parser.add_argument('--vis_freq', '-vf', type=int, default=None,
                         help='visualisation frequency in iteration')
+    parser.add_argument('--HU_base_vis', '-hubv', type=int, default=0, help='minimum HU value to be visualised')
+    parser.add_argument('--HU_range_vis', '-hurv', type=int, default=0, help='the maximum HU value to be visualised will be HU_base+HU_range')
 
 
     args = parser.parse_args()
@@ -196,5 +203,8 @@ def arguments():
         args.dis_chs = [int(args.dis_basech) * (2**i) for i in range(args.dis_ndown)]
     if args.imgtype=="dcm":
         args.grey = True
+        if not args.crop_height:
+            args.crop_height = 280  ## default for the CBCT dataset
+        if not args.crop_width:
+            args.crop_width = 368  ## default for the CBCT dataset
     return(args)
-

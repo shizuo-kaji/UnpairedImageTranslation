@@ -47,7 +47,7 @@ The latent representations Z are regularised by a third discriminator (-lz 1) an
 Gaussian noise is injected before conversion (-n 0.03) and also in the latent bottleneck layer (-nz 0.03).
 
 The training lasts for 50 epochs (-e 50).
-Learned model files "gen_g??.npz" and "gen_f??.npz" will appear under the directory "results" (-o results).
+Learned model files "enc_???.npz" and "dec_???.npz" will appear under the directory "results" (-o results).
 During training, it occasionally produces image files under "results/vis" containing original, converted, cyclically converted images in each row. 
 - A brief description of other command-line arguments is given by
 ```

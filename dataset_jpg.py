@@ -14,7 +14,7 @@ from consts import dtypes
 
 ## load images everytime from disk: slower but low memory usage
 class DatasetOutMem(dataset_mixin.DatasetMixin):
-    def __init__(self, path, args, random=0):
+    def __init__(self, path, args, base, rang, random=0):
         self.path = path
         self.names = []
         self.random = random
@@ -22,6 +22,8 @@ class DatasetOutMem(dataset_mixin.DatasetMixin):
         self.ch = 3 if self.color else 1
         self.imgtype=args.imgtype
         self.dtype = dtypes[args.dtype]
+        self.base = base # used only with npy files
+        self.range = rang
         for fn in glob.glob(os.path.join(self.path,"**/*.{}".format(self.imgtype)), recursive=True):
             self.names.append(fn)
         if args.crop_height and args.crop_width:
@@ -47,6 +49,7 @@ class DatasetOutMem(dataset_mixin.DatasetMixin):
     def get_example(self, i):
         if self.imgtype == "npy":
             img = np.load(self.get_img_path(i))
+            img = 2*(np.clip(img,self.base,self.base+self.range)-self.base)/self.range-1.0
             if len(img.shape) == 2:
                 img = img[np.newaxis,]
         else:

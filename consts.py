@@ -11,14 +11,14 @@ optim = {
     'Momentum': optimizers.MomentumSGD,
     'AdaDelta': optimizers.AdaDelta,
     'AdaGrad': optimizers.AdaGrad,
-    'Adam': functools.partial(optimizers.Adam, beta1=0.5),
-    'AdaBound': functools.partial(optimizers.Adam, beta1=0.5, adabound=True),
+    'Adam': functools.partial(optimizers.Adam, beta1=0.1),
+    'AdaBound': functools.partial(optimizers.Adam, beta1=0.1, adabound=True),
     'RMSprop': optimizers.RMSprop,
     'NesterovAG': optimizers.NesterovAG,
 }
 try:
     from eve import Eve
-    optim['Eve'] = functools.partial(Eve, beta1=0.5)
+    optim['Eve'] = functools.partial(Eve, beta1=0.1)
 except:
     pass
 try:
@@ -36,11 +36,10 @@ activation_func = {
     'relu': F.relu,
     'lrelu': lambda x: F.leaky_relu(x, slope=0.2),
     'tanh': F.tanh,
+    'sigmoid': F.sigmoid,
     'none': None,
 }
 
-downlayer = ['down','maxpool','maxpool_res','avgpool','avgpool_res']
-uplayer = ['unpool','unpool_res','deconv','pixsh','pixsh_res','resize','resize_res']
 unettype = ['none','concat','add','conv']
 
 def feature_vector_normalization(x, eps=1e-8):
@@ -58,7 +57,7 @@ norm_layer = {
 }
 try:
     from instance_normalization import InstanceNormalization
-    norm_layer['instance'] = functools.partial(InstanceNormalization, use_gamma=False, use_beta=True)
-    norm_layer['instance_aff'] = functools.partial(InstanceNormalization, use_gamma=True, use_beta=True)
+    norm_layer['instance'] = functools.partial(InstanceNormalization, use_gamma=False, use_beta=False)
+    norm_layer['instance_aff'] = functools.partial(InstanceNormalization, use_gamma=True, use_beta=False)
 except:
     pass

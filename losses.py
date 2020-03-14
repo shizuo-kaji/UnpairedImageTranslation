@@ -119,12 +119,11 @@ def loss_grad(x, y, norm='l1'):
         return F.mean_squared_error(dxx,dyx)+F.mean_squared_error(dxy,dyy)
 
 # compare only pixels with x < threshold. Note x is fixed and y is variable
-def loss_comp_low(x,y,threshold,norm='l1'):
+def loss_comp_low(x,y,threshold,norm='l2'):
     if norm=='l1':
-        return(F.sum( ( (x.array<threshold)^(y.array<threshold) ) * F.absolute(x-y)))
+        return(F.sum( ( (x.array <= threshold)^(y.array <= threshold) ) * F.absolute(x-y)))
     else:
-        return(F.sum( ( (x.array<threshold)^(y.array<threshold) ) * ((x-y)**2) ))
-
+        return(F.sum( ( (x.array <= threshold)^(y.array <= threshold) ) * ((x-y)**2) ))
 
 def loss_func_comp(y, val, noise=0):
     xp = cuda.get_array_module(y.data)

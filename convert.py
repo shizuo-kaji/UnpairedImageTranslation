@@ -9,19 +9,16 @@ import warnings
 warnings.filterwarnings("ignore")
 
 import argparse
-import os
-import glob
-import json
-import codecs
+import os,glob
+import json,codecs
 import cv2
 from datetime import datetime as dt
 import time
-import chainer.cuda
-from chainer import serializers, Variable
 import numpy as np
 import net
 import random
 import chainer.functions as F
+from chainer import serializers, Variable, cuda
 from chainercv.utils import write_image
 from chainercv.transforms import resize
 from chainerui.utils import save_args
@@ -30,7 +27,7 @@ from consts import dtypes
 from chainer.links import VGG16Layers
 
 def gradimg(img):
-    grad = xp.tile(xp.asarray([[[[1,0,-1],[2,0,-2],[1,0,-1]]]],dtype=img.dtype),(img.data.shape[1],1,1))
+    grad = xp.tile(xp.asarray([[[[1,0,-1],[2,0,-2],[1,0,-1]]]],dtype=img.dtype),(img.array.shape[1],1,1))
     dx = F.convolution_2d(img,grad)
     dy = F.convolution_2d(img,xp.transpose(grad,(0,1,3,2)))
     return(F.sqrt(dx**2+dy**2))
@@ -51,7 +48,7 @@ if __name__ == '__main__':
 
     args.gpu = args.gpu[0]
     if args.gpu >= 0:
-        chainer.cuda.get_device_from_id(args.gpu).use()
+        cuda.get_device_from_id(args.gpu).use()
         print('use gpu {}'.format(args.gpu))
 
     ## load arguments from "arg" file used in training
@@ -59,9 +56,9 @@ if __name__ == '__main__':
         with open(args.argfile, 'r') as f:
             larg = json.load(f)
             root=os.path.dirname(args.argfile)
-            for x in ['HU_base','HU_range','forceSpacing','perceptual_layer','num_slices','out_ch',
-              'dis_norm','dis_activation','dis_chs','dis_ksize','dis_sample','dis_down','dis_reg_weighting','dis_wgan',
-              'gen_norm','gen_activation','gen_out_activation','gen_nblock','gen_chs','gen_sample','gen_down','gen_up','gen_ksize','unet',
+            for x in ['HU_baseA','HU_rangeA','forceSpacing','perceptual_layer','num_slices','out_ch','grey',
+              'dis_norm','dis_activation','dis_out_activation','dis_chs','dis_ksize','dis_sample','dis_down','dis_reg_weighting','dis_wgan','dis_attention',
+              'gen_norm','gen_activation','gen_out_activation','gen_nblock','gen_chs','gen_sample','gen_down','gen_up','gen_ksize','unet','skipdim','latent_dim',
               'gen_fc','gen_fc_activation','spconv','eqconv','senet','dtype']:
                 if x in larg:
                     setattr(args, x, larg[x])
@@ -90,7 +87,7 @@ if __name__ == '__main__':
     if not hasattr(args,'out_ch'):
         args.out_ch = 1 if args.grey else 3
 
-    dataset = Dataset(path=args.root, args=args, random=0)
+    dataset = Dataset(path=args.root, args=args, base=args.HU_baseA, rang=args.HU_rangeA, random=0)
     args.ch = dataset.ch
 #    iterator = chainer.iterators.MultiprocessIterator(dataset, args.batch_size, n_processes=3, repeat=False, shuffle=False)
     iterator = chainer.iterators.MultithreadIterator(dataset, args.batch_size, n_threads=3, repeat=False, shuffle=False)   ## best performance
@@ -199,17 +196,17 @@ if __name__ == '__main__':
             cycle.to_cpu()
             tv.to_cpu()
             perc_diff.to_cpu()
-            img_disx = img_disx.data
-            img_disy = img_disy.data
-            imgs = imgs.data
-            cycle_diff = diff.data
-            cycle = cycle.data
-            tv = tv.data
-            perc_diff = perc_diff.data
+            img_disx = img_disx.array
+            img_disy = img_disy.array
+            imgs = imgs.array
+            cycle_diff = diff.array
+            cycle = cycle.array
+            tv = tv.array
+            perc_diff = perc_diff.array
 
         ##
         out.to_cpu()
-        out = out.data        
+        out = out.array        
         ## output images
         for i in range(len(out)):
             fn = dataset.get_img_path(cnt)

@@ -23,6 +23,7 @@ class VisEvaluator(extensions.Evaluator):
         super(VisEvaluator, self).__init__(*args, **kwargs)
         self.vis_out = params['vis_out']
         self.slice = params['slice']
+        self.args = params['args']
         if self.slice:
             self.num_s = len(self.slice)
         else:
@@ -49,51 +50,33 @@ class VisEvaluator(extensions.Evaluator):
                     x_y = models['dec_y'](models['enc_x'](x))        
                     #x_y_x = models['dec_x'](models['enc_x'](x))    ## X => Z => X
                     x_y_x = models['dec_x'](models['enc_y'](x_y))       ## X => Y => X
-                else:
-                    x_y = models['gen_g'](x)
-                    x_y_x = models['gen_f'](x_y)
-
-#        for i, var in enumerate([x, x_y]):
-        for i, var in enumerate([x, x_y, x_y_x]):
-            imgs = postprocess(var).astype(np.float32)
-            for j in range(len(imgs)):
-                if self.slice != None:
-                    for k in self.slice:
-                        ax = fig.add_subplot(gs[j*len(self.slice)+k,i])
-                        ax.imshow(imgs[j,:,:,k], interpolation='none',cmap='gray',vmin=0,vmax=1)
-                        ax.set_xticks([])
-                        ax.set_yticks([])
-                else:
-                    ax = fig.add_subplot(gs[j,i])
-                    if(imgs[j].shape[2] == 1):
-                        ax.imshow(imgs[j][:,:,0], interpolation='none',cmap='gray',vmin=0,vmax=1)
-                    else:
-                        ax.imshow(imgs[j], interpolation='none',vmin=0,vmax=1)
-                    ax.set_xticks([])
-                    ax.set_yticks([])
-
-        with chainer.using_config('train', False):
-            with chainer.function.no_backprop_mode():
-                if len(models)>2:
                     y_x = models['dec_x'](models['enc_y'](y))
                     #y_x_y = models['dec_y'](models['enc_y'](y))   ## Y => Z => Y
                     y_x_y = models['dec_y'](models['enc_x'](y_x)) ## Y => X => Y
-                else:   # (gen_g, gen_f)
+                else:
+                    x_y = models['gen_g'](x)
+                    x_y_x = models['gen_f'](x_y)
                     y_x = models['gen_f'](y)
                     y_x_y = models['gen_g'](y_x)
 
-#        for i, var in enumerate([y, y_y]):
-        for i, var in enumerate([y, y_x, y_x_y]):
+#        for i, var in enumerate([x, x_y]):
+        for i, var in enumerate([x, x_y, x_y_x,  y, y_x, y_x_y]):
             imgs = postprocess(var).astype(np.float32)
+            if self.args.imgtype=='dcm' and self.args.HU_range_vis>0:
+                if (i % 2 == 0):
+                    imgs = (imgs*self.args.HU_rangeA + self.args.HU_baseA-self.args.HU_base_vis)/self.args.HU_range_vis
+                else:
+                    imgs = (imgs*self.args.HU_rangeB + self.args.HU_baseB-self.args.HU_base_vis)/self.args.HU_range_vis
+            lb = 0 if i < 3 else len(batch_x)
             for j in range(len(imgs)):
                 if self.slice != None:
                     for k in self.slice:
-                        ax = fig.add_subplot(gs[(j+len(batch_x))*len(self.slice)+k,i])
+                        ax = fig.add_subplot(gs[(j+lb)*len(self.slice)+k,i%3])
                         ax.imshow(imgs[j,:,:,k], interpolation='none',cmap='gray',vmin=0,vmax=1)
                         ax.set_xticks([])
                         ax.set_yticks([])
                 else:
-                    ax = fig.add_subplot(gs[j+len(batch_x),i])
+                    ax = fig.add_subplot(gs[j+lb,i%3])
                     if(imgs[j].shape[2] == 1):
                         ax.imshow(imgs[j][:,:,0], interpolation='none',cmap='gray',vmin=0,vmax=1)
                     else:

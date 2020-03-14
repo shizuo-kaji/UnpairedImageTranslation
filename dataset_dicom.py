@@ -10,10 +10,10 @@ from chainercv.transforms import random_crop,center_crop,resize
 from consts import dtypes
 
 class Dataset(dataset_mixin.DatasetMixin):
-    def __init__(self, path, args, random=0):
+    def __init__(self, path, args, base, rang, random=0, mask_value=None):
         self.path = path
-        self.base = args.HU_base
-        self.range = args.HU_range
+        self.base = base
+        self.range = rang
         self.random = random
         self.ch = args.num_slices
         self.forceSpacing = args.forceSpacing
@@ -21,12 +21,8 @@ class Dataset(dataset_mixin.DatasetMixin):
         self.imgtype=args.imgtype
         self.dcms = []
         self.names = []
-        self.idx = [] 
-
-        if not args.crop_height:
-            self.crop = (384,480)  ## default for the CBCT dataset
-        else:
-            self.crop = (args.crop_height,args.crop_width)
+        self.idx = []
+        self.crop = (args.crop_height,args.crop_width)
 
         print("Loading Dataset from: {}".format(path))
         dirlist = [path]
@@ -67,8 +63,11 @@ class Dataset(dataset_mixin.DatasetMixin):
 #                        volume = rescale(sl,scaling,mode="reflect",preserve_range=True)
                     vollist.append(sl)
                 volume = self.img2var(np.stack(vollist))   # shape = (z,x,y)
-                print("Loaded volume of size {}".format(volume.shape))
-                volume = center_crop(volume,(self.crop[0]+self.random, self.crop[1]+self.random))
+                print("Loaded volume {} of size {}".format(dirname,volume.shape))
+                if volume.shape[1]<self.crop[0]+2*self.random or volume.shape[2] < self.crop[1]+2*self.random:
+                    p = max(self.crop[0]+2*self.random-volume.shape[1],self.crop[1]+2*self.random-volume.shape[2])
+                    volume = np.pad(volume,((0,0),(p,p),(p,p)),'edge')
+                volume = center_crop(volume,(self.crop[0]+2*self.random, self.crop[1]+2*self.random))
                 self.dcms.append(volume)
                 self.names.append( [filenames[i] for i in s] )
                 self.idx.extend([(j,k) for k in range((self.ch-1)//2,len(slices)-self.ch//2)])

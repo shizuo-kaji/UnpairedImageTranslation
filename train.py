@@ -10,20 +10,27 @@ matplotlib.use('Agg')
 import chainer
 from chainer import serializers, training, cuda
 from chainer.training import extensions
-#from chainerui.extensions import CommandsExtension
+from chainerui.extensions import CommandsExtension
 from chainerui.utils import save_args
 from chainer.dataset import convert
 import chainer.functions as F
 
-from net import Discriminator,Encoder,Decoder
+from net import Discriminator
+from net import Encoder,Decoder
 #from net_dp import Encoder,Decoder
 from arguments import arguments 
 from updater import Updater
 from visualization import VisEvaluator
 from consts import dtypes,optim
 
+def plot_ylimit(f,a,summary):
+    a.set_ylim(top=0.1)
+def plot_log(f,a,summary):
+    a.set_yscale('log')
+
 def main():
     args = arguments()
+    print(args)
     out = os.path.join(args.out, dt.now().strftime('%m%d_%H%M'))
 
     if args.imgtype=="dcm":
@@ -37,7 +44,6 @@ def main():
         exit()
     if len(args.gpu)==1 and args.gpu[0] >= 0:
         chainer.cuda.get_device_from_id(args.gpu[0]).use()
-#        cuda.cupy.cuda.set_allocator(cuda.cupy.cuda.MemoryPool().malloc)
 
     # Enable autotuner of cuDNN
     chainer.config.autotune = True
@@ -52,13 +58,13 @@ def main():
     ## dataset iterator
     print("Setting up data iterators...")
     train_A_dataset = Dataset(
-        path=os.path.join(args.root, 'trainA'), args=args, random=args.random_translate)
+        path=os.path.join(args.root, 'trainA'), args=args, base=args.HU_baseA, rang=args.HU_rangeA, random=args.random_translate)
     train_B_dataset = Dataset(
-        path=os.path.join(args.root, 'trainB'), args=args, random=args.random_translate)
+        path=os.path.join(args.root, 'trainB'), args=args, base=args.HU_baseB, rang=args.HU_rangeB, random=args.random_translate)
     test_A_dataset = Dataset(
-        path=os.path.join(args.root, 'testA'), args=args, random=0)
+        path=os.path.join(args.root, 'testA'), args=args, base=args.HU_baseA, rang=args.HU_rangeA, random=0)
     test_B_dataset = Dataset(
-        path=os.path.join(args.root, 'testB'), args=args, random=0)
+        path=os.path.join(args.root, 'testB'), args=args, base=args.HU_baseB, rang=args.HU_rangeB, random=0)
 
     args.ch = train_A_dataset.ch
     args.out_ch = train_B_dataset.ch
@@ -68,20 +74,12 @@ def main():
     print("channels in A {}, channels in B {}".format(args.ch,args.out_ch))
     save_args(args, out)
 
-    test_A_iter = chainer.iterators.SerialIterator(test_A_dataset, args.nvis_A, shuffle=False)
-    test_B_iter = chainer.iterators.SerialIterator(test_B_dataset, args.nvis_B, shuffle=False)
-
-    
-    if args.batch_size > 1:
-        train_A_iter = chainer.iterators.MultiprocessIterator(
-            train_A_dataset, args.batch_size, n_processes=3)
-        train_B_iter = chainer.iterators.MultiprocessIterator(
-            train_B_dataset, args.batch_size, n_processes=3)
-    else:
-        train_A_iter = chainer.iterators.SerialIterator(
-            train_A_dataset, args.batch_size)
-        train_B_iter = chainer.iterators.SerialIterator(
-            train_B_dataset, args.batch_size)
+#    test_A_iter = chainer.iterators.SerialIterator(test_A_dataset, args.nvis_A, shuffle=False)
+#    test_B_iter = chainer.iterators.SerialIterator(test_B_dataset, args.nvis_B, shuffle=False)
+    test_A_iter = chainer.iterators.MultithreadIterator(test_A_dataset, args.nvis_A, shuffle=False, n_threads=3)
+    test_B_iter = chainer.iterators.MultithreadIterator(test_B_dataset, args.nvis_B, shuffle=False, n_threads=3)   
+    train_A_iter = chainer.iterators.MultithreadIterator(train_A_dataset, args.batch_size, n_threads=3)
+    train_B_iter = chainer.iterators.MultithreadIterator(train_B_dataset, args.batch_size, n_threads=3)
 
     # setup models
     enc_x = Encoder(args)
@@ -157,7 +155,7 @@ def main():
             'train_B': train_B_iter,
         },
         optimizer=optimizers,
-#        converter=convert.ConcatWithAsyncTransfer(),
+        converter=convert.ConcatWithAsyncTransfer(),
         device=args.gpu[0],
         params={
             'args': args
@@ -186,19 +184,30 @@ def main():
 
     log_keys = ['epoch', 'iteration','lr']
     log_keys_cycle = ['opt_enc_x/loss_cycle', 'opt_enc_y/loss_cycle', 'opt_dec_x/loss_cycle',  'opt_dec_y/loss_cycle', 'myval/cycle_x_l1', 'myval/cycle_y_l1']
-    log_keys_d = ['opt_x/loss_real','opt_x/loss_fake','opt_y/loss_real','opt_y/loss_fake','opt_z/loss_x','opt_z/loss_y']
     log_keys_adv = ['opt_enc_y/loss_adv','opt_dec_y/loss_adv','opt_enc_x/loss_adv','opt_dec_x/loss_adv']
-    log_keys.extend([ 'opt_enc_x/loss_reg','opt_enc_y/loss_reg', 'opt_dec_y/loss_tv'])
+    log_keys_d = []
+    if args.lambda_reg>0:
+        log_keys.extend(['opt_enc_x/loss_reg','opt_enc_y/loss_reg'])
+    if args.lambda_tv>0:
+        log_keys.extend(['opt_dec_y/loss_tv'])
     if args.lambda_air>0:
         log_keys.extend(['opt_dec_x/loss_air','opt_dec_y/loss_air'])
     if args.lambda_grad>0:
-        log_keys.extend([ 'opt_dec_x/loss_grad','opt_dec_y/loss_grad'])
-    if args.lambda_identity_x>0:
-        log_keys.extend(['opt_dec_x/loss_id','opt_dec_y/loss_id'])
+        log_keys.extend(['opt_dec_x/loss_grad','opt_dec_y/loss_grad'])
+    if args.lambda_identity_x>0: # perceptual
+        log_keys.extend(['opt_enc_x/loss_id','opt_enc_y/loss_id'])
+    if args.lambda_domain>0:
+        log_keys_cycle.extend(['opt_dec_x/loss_dom','opt_dec_y/loss_dom'])
     if args.dis_reg_weighting>0:
         log_keys_d.extend(['opt_x/loss_reg','opt_y/loss_reg','opt_z/loss_reg'])
     if args.dis_wgan:
-        log_keys_d.extend(['opt_x/loss_gp','opt_y/loss_gp','opt_z/loss_gp'])
+        log_keys_d.extend(['opt_x/loss_dis','opt_x/loss_gp','opt_y/loss_dis','opt_y/loss_gp'])
+        if args.lambda_dis_z>0:
+            log_keys_d.extend(['opt_z/loss_dis','opt_z/loss_gp'])
+    else:
+        log_keys_d.extend(['opt_x/loss_real','opt_x/loss_fake','opt_y/loss_real','opt_y/loss_fake'])
+        if args.lambda_dis_z>0:
+            log_keys_d.extend(['opt_z/loss_x','opt_z/loss_y'])
 
     log_keys_all = log_keys+log_keys_d+log_keys_adv+log_keys_cycle
     trainer.extend(extensions.LogReport(keys=log_keys_all, trigger=log_interval))
@@ -213,21 +222,22 @@ def main():
     for e in [opt_x,opt_y,opt_z]:
         trainer.extend(extensions.LinearShift('alpha', (args.learning_rate_d,0), (decay_start_iter,decay_end_iter), optimizer=e))
     ## dump graph
-    if args.report_start < 1:
-        if args.lambda_tv>0:
-            trainer.extend(extensions.dump_graph('opt_dec_y/loss_tv', out_name='dec.dot'))
-        if args.lambda_reg>0:
-            trainer.extend(extensions.dump_graph('opt_enc_x/loss_reg', out_name='enc.dot'))            
-        trainer.extend(extensions.dump_graph('opt_x/loss_fake', out_name='dis.dot'))
+    if args.lambda_Az>0:
+        trainer.extend(extensions.dump_graph('opt_enc_x/loss_cycle', out_name='gen.dot'))
+    if args.lambda_dis_x>0:
+        if args.dis_wgan:
+            trainer.extend(extensions.dump_graph('opt_x/loss_dis', out_name='dis.dot'))
+        else:
+            trainer.extend(extensions.dump_graph('opt_x/loss_fake', out_name='dis.dot'))
 
     # ChainerUI
-#    trainer.extend(CommandsExtension())
+    trainer.extend(CommandsExtension())
 
     if extensions.PlotReport.available():
-        trainer.extend(extensions.PlotReport(log_keys[3:], 'iteration',trigger=plot_interval, file_name='loss.png'))
+        trainer.extend(extensions.PlotReport(log_keys[3:], 'iteration',trigger=plot_interval, file_name='loss.png', postprocess=plot_log))
         trainer.extend(extensions.PlotReport(log_keys_d, 'iteration', trigger=plot_interval, file_name='loss_d.png'))
         trainer.extend(extensions.PlotReport(log_keys_adv, 'iteration', trigger=plot_interval, file_name='loss_adv.png'))
-        trainer.extend(extensions.PlotReport(log_keys_cycle, 'iteration', trigger=plot_interval, file_name='loss_cyc.png'))
+        trainer.extend(extensions.PlotReport(log_keys_cycle, 'iteration', trigger=plot_interval, file_name='loss_cyc.png', postprocess=plot_log))
 
     ## visualisation
     vis_folder = os.path.join(out, "vis")
@@ -236,7 +246,7 @@ def main():
         args.vis_freq = len(train_A_dataset)//2        
     s = [k for k in range(args.num_slices)] if args.num_slices>0 and args.imgtype=="dcm" else None
     trainer.extend(VisEvaluator({"testA":test_A_iter, "testB":test_B_iter}, {"enc_x":enc_x, "enc_y":enc_y,"dec_x":dec_x,"dec_y":dec_y},
-            params={'vis_out': vis_folder, 'slice':s}, device=args.gpu[0]),trigger=(args.vis_freq, 'iteration'))
+            params={'vis_out': vis_folder, 'slice':s, 'args':args}, device=args.gpu[0]),trigger=(args.vis_freq, 'iteration'))
 
     ## output filenames of training dataset
     with open(os.path.join(out, 'trainA.txt'),'w') as output:
