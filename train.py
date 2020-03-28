@@ -1,6 +1,5 @@
 #!/usr/bin/env python
-## TODO: detect failure from mismatch between channels(adjacent slices)
-import os
+import os,sys
 from datetime import datetime as dt
 import numpy as np
 
@@ -31,7 +30,6 @@ def plot_log(f,a,summary):
 def main():
     args = arguments()
     print(args)
-    out = os.path.join(args.out, dt.now().strftime('%m%d_%H%M'))
 
     if args.imgtype=="dcm":
         from dataset_dicom import Dataset as Dataset 
@@ -68,11 +66,7 @@ def main():
 
     args.ch = train_A_dataset.ch
     args.out_ch = train_B_dataset.ch
-
-    print(args)
-    print("\nresults are saved under: ",out)
     print("channels in A {}, channels in B {}".format(args.ch,args.out_ch))
-    save_args(args, out)
 
 #    test_A_iter = chainer.iterators.SerialIterator(test_A_dataset, args.nvis_A, shuffle=False)
 #    test_B_iter = chainer.iterators.SerialIterator(test_B_dataset, args.nvis_B, shuffle=False)
@@ -117,6 +111,7 @@ def main():
         optimizer = optim[opttype](lr)
         #from profiled_optimizer import create_marked_profile_optimizer
 #        optimizer = create_marked_profile_optimizer(optim[opttype](lr), sync=True, sync_level=2)
+        optimizer.setup(model)
         if args.weight_decay>0:
             if opttype in ['Adam','AdaBound','Eve']:
                 optimizer.weight_decay_rate = args.weight_decay
@@ -125,7 +120,6 @@ def main():
                     optimizer.add_hook(chainer.optimizer.WeightDecay(args.weight_decay))
                 else:
                     optimizer.add_hook(chainer.optimizer_hooks.Lasso(args.weight_decay))
-        optimizer.setup(model)
         return optimizer
 
     opt_enc_x = make_optimizer(enc_x, args.learning_rate_g, args.optimizer)
@@ -173,7 +167,7 @@ def main():
         stop_trigger = (args.iteration, 'iteration')
     else:
         stop_trigger = (args.lrdecay_start + args.lrdecay_period, 'epoch')
-    trainer = training.Trainer(updater, stop_trigger, out=out)
+    trainer = training.Trainer(updater, stop_trigger, out=args.out)
     for e in models:
         trainer.extend(extensions.snapshot_object(
             models[e], e+'{.updater.epoch}.npz'), trigger=model_save_interval)
@@ -240,7 +234,7 @@ def main():
         trainer.extend(extensions.PlotReport(log_keys_cycle, 'iteration', trigger=plot_interval, file_name='loss_cyc.png', postprocess=plot_log))
 
     ## visualisation
-    vis_folder = os.path.join(out, "vis")
+    vis_folder = os.path.join(args.out, "vis")
     os.makedirs(vis_folder, exist_ok=True)
     if not args.vis_freq:
         args.vis_freq = len(train_A_dataset)//2        
@@ -249,11 +243,11 @@ def main():
             params={'vis_out': vis_folder, 'slice':s, 'args':args}, device=args.gpu[0]),trigger=(args.vis_freq, 'iteration'))
 
     ## output filenames of training dataset
-    with open(os.path.join(out, 'trainA.txt'),'w') as output:
+    with open(os.path.join(args.out, 'trainA.txt'),'w') as output:
         for f in train_A_dataset.names:
             output.writelines("\n".join(f))
             output.writelines("\n")
-    with open(os.path.join(out, 'trainB.txt'),'w') as output:
+    with open(os.path.join(args.out, 'trainB.txt'),'w') as output:
         for f in train_B_dataset.names:
             output.writelines("\n".join(f))
             output.writelines("\n")
@@ -261,11 +255,15 @@ def main():
     # archive the scripts
     rundir = os.path.dirname(os.path.realpath(__file__))
     import zipfile
-    with zipfile.ZipFile(os.path.join(out,'script.zip'), 'w', compression=zipfile.ZIP_DEFLATED) as new_zip:
+    with zipfile.ZipFile(os.path.join(args.out,'script.zip'), 'w', compression=zipfile.ZIP_DEFLATED) as new_zip:
         for f in ['train.py','net.py','updater.py','consts.py','losses.py','arguments.py','convert.py']:
             new_zip.write(os.path.join(rundir,f),arcname=f)
 
     # Run the training
+    print("\nresults are saved under: ",args.out)
+    save_args(args, args.out)
+    with open(os.path.join(args.out,"args.txt"), 'w') as fh:
+        fh.write(" ".join(sys.argv))
     trainer.run()
 
 

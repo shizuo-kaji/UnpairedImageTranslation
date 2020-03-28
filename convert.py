@@ -17,6 +17,7 @@ import time
 import numpy as np
 import net
 import random
+import chainer
 import chainer.functions as F
 from chainer import serializers, Variable, cuda
 from chainercv.utils import write_image

@@ -2,7 +2,8 @@ import argparse
 import numpy as np
 import chainer.functions as F
 from consts import activation_func,dtypes,norm_layer,unettype,optim
-
+import os
+from datetime import datetime as dt
 
 def arguments():
     parser = argparse.ArgumentParser()
@@ -66,10 +67,10 @@ def arguments():
                         help='strength of noise injection for the latent variable')
 
     ## DICOM specific
-    parser.add_argument('--HU_baseA', '-huba', type=int, default=-500, help='minimum HU value to be accounted for')
-    parser.add_argument('--HU_rangeA', '-hura', type=int, default=700, help='the maximum HU value to be accounted for will be HU_base+HU_range')
-    parser.add_argument('--HU_baseB', '-hubb', type=int, default=-500, help='minimum HU value to be accounted for')
-    parser.add_argument('--HU_rangeB', '-hurb', type=int, default=700, help='the maximum HU value to be accounted for will be HU_base+HU_range')
+    parser.add_argument('--HU_baseA', '-huba', type=int, default=-800, help='minimum HU value to be accounted for')
+    parser.add_argument('--HU_rangeA', '-hura', type=int, default=1000, help='the maximum HU value to be accounted for will be HU_base+HU_range')
+    parser.add_argument('--HU_baseB', '-hubb', type=int, default=-800, help='minimum HU value to be accounted for')
+    parser.add_argument('--HU_rangeB', '-hurb', type=int, default=1000, help='the maximum HU value to be accounted for will be HU_base+HU_range')
     parser.add_argument('--slice_range', '-sr', type=float, nargs="*", default=None, help='z-coords of slices used')
     parser.add_argument('--forceSpacing', '-fs', type=float, default=-1,   # 0.7634, 
                             help='scale dicom to match the specified spacing')
@@ -80,7 +81,7 @@ def arguments():
     parser.add_argument('--dis_out_activation', '-do', default='none', choices=activation_func.keys())
     parser.add_argument('--dis_chs', '-dc', type=int, nargs="*", default=None,
                         help='Number of channels in down layers in discriminator')
-    parser.add_argument('--dis_basech', '-db', type=int, default=64,
+    parser.add_argument('--dis_basech', '-db', type=int, default=32,    #64
                         help='the base number of channels in discriminator (doubled in each down-layer)')
     parser.add_argument('--dis_ndown', '-dl', type=int, default=3,
                         help='number of down layers in discriminator')
@@ -176,6 +177,8 @@ def arguments():
                         help='smoothing parameter for total variation')
     parser.add_argument('--tv_method', '-tm', default='abs', choices=['abs','sobel','usual'],
                         help='method of calculating total variation')
+    parser.add_argument('--air_threshold', '-at', type=float, default=-0.997,
+                        help='values below this is considered as air for air comparison loss')
 
     ## visualisation during training
     parser.add_argument('--nvis_A', type=int, default=6,
@@ -207,4 +210,5 @@ def arguments():
             args.crop_height = 280  ## default for the CBCT dataset
         if not args.crop_width:
             args.crop_width = 368  ## default for the CBCT dataset
+    args.out = os.path.join(args.out, dt.now().strftime('%m%d_%H%M'))
     return(args)

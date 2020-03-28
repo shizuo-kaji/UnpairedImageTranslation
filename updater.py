@@ -129,8 +129,8 @@ class Updater(chainer.training.StandardUpdater):
             chainer.report({'loss_id': 1e-3*loss_id_y}, self.enc_y)
         ## background (pixels with value -1) should be preserved
         if self.args.lambda_air > 0:
-            loss_air_x = losses.loss_comp_low(x,x_y,-0.98,norm='l2')#+losses.loss_comp_low(y_x,y_x_y,-0.98,norm='l2')
-            loss_air_y = losses.loss_comp_low(y,y_x,-0.98,norm='l2')#+losses.loss_comp_low(x_y,x_y_x,-0.98,norm='l2')
+            loss_air_x = losses.loss_comp_low(x,x_y,self.args.air_threshold,norm='l2')
+            loss_air_y = losses.loss_comp_low(y,y_x,self.args.air_threshold,norm='l2')
             loss_gen = loss_gen + self.args.lambda_air * (loss_air_x+loss_air_y)
             chainer.report({'loss_air': loss_air_x}, self.dec_y)
             chainer.report({'loss_air': loss_air_y}, self.dec_x)

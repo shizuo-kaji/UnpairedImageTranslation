@@ -37,7 +37,7 @@ class Dataset(dataset_mixin.DatasetMixin):
             loc = []
             for f in files:
                 ds = dicom.dcmread(f, force=True)
-                ds.file_meta.TransferSyntaxUID = dicom.uid.ImplicitVRLittleEndian
+                #ds.file_meta.TransferSyntaxUID = dicom.uid.ImplicitVRLittleEndian
                 # sort slices according to SliceLocation header
                 if hasattr(ds, 'ImagePositionPatient') and (args.slice_range is not None): # Thanks to johnrickman for letting me know to use this DICOM entry
 #                if hasattr(ds, 'SliceLocation'):
@@ -92,9 +92,9 @@ class Dataset(dataset_mixin.DatasetMixin):
 
     def overwrite(self,new,i,salt):
         ref_dicom = dicom.dcmread(self.get_img_path(i), force=True)
-        ref_dicom.file_meta.TransferSyntaxUID = dicom.uid.ExplicitVRLittleEndian #dicom.uid.ImplicitVRLittleEndian
-        ref_dicom.is_little_endian = True
-        ref_dicom.is_implicit_VR = False
+        #ref_dicom.file_meta.TransferSyntaxUID = dicom.uid.ExplicitVRLittleEndian #dicom.uid.ImplicitVRLittleEndian
+        #ref_dicom.is_little_endian = True
+        #ref_dicom.is_implicit_VR = False
         dt=ref_dicom.pixel_array.dtype
         img = np.full(ref_dicom.pixel_array.shape, self.base, dtype=np.float32)
         ch,cw = img.shape
