@@ -106,15 +106,21 @@ def loss_perceptual(x,y,model,layer='conv4_2',grey=False):
     return(loss)
 
 ## apply Sobel's filter and take difference
-def loss_grad(x, y, norm='l1'):
-    xp = cuda.get_array_module(x.data)
-    grad = xp.tile(xp.asarray([[[[1,0,-1],[2,0,-2],[1,0,-1]]]],dtype=x.dtype),(x.data.shape[1],1,1))
-    dxx = F.convolution_2d(x,grad)
-    dyx = F.convolution_2d(y,grad)
-    dxy = F.convolution_2d(x,xp.transpose(grad,(0,1,3,2)))
-    dyy = F.convolution_2d(y,xp.transpose(grad,(0,1,3,2)))
+def loss_grad(x, y, method='diff',norm='l1'):
+    if method=="diff":
+        dxx = x[:, :, 1:, :] - x[:, :, :-1, :]
+        dyx = y[:, :, 1:, :] - y[:, :, :-1, :]
+        dxy = x[:, :, :, 1:] - x[:, :, :, :-1]
+        dyy = y[:, :, :, 1:] - y[:, :, :, :-1]
+    elif method=="sobel":
+        xp = cuda.get_array_module(x.data)
+        grad = xp.tile(xp.asarray([[[[1,0,-1],[2,0,-2],[1,0,-1]]]],dtype=x.dtype),(x.data.shape[1],1,1))
+        dxx = F.convolution_2d(x,grad)
+        dyx = F.convolution_2d(y,grad)
+        dxy = F.convolution_2d(x,xp.transpose(grad,(0,1,3,2)))
+        dyy = F.convolution_2d(y,xp.transpose(grad,(0,1,3,2)))
     if norm=='l1':
-        return F.mean_absolute_error(dxx,dyx)+F.mean_squared_error(dxy,dyy)
+        return F.mean_absolute_error(dxx,dyx)+F.mean_absolute_error(dxy,dyy)
     else:
         return F.mean_squared_error(dxx,dyx)+F.mean_squared_error(dxy,dyy)
 
