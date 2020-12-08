@@ -38,8 +38,9 @@ class VisEvaluator(extensions.Evaluator):
         if self.eval_hook:
             self.eval_hook(self)
 
+        n_col = 4
         fig = plt.figure(figsize=(9, 3 * self.num_s*(len(batch_x)+ len(batch_y))))
-        gs = gridspec.GridSpec( self.num_s*(len(batch_x)+ len(batch_y)), 3, wspace=0.1, hspace=0.1)
+        gs = gridspec.GridSpec( self.num_s*(len(batch_x)+ len(batch_y)), n_col, wspace=0.1, hspace=0.1)
 
         x = Variable(self.converter(batch_x, self.device))
         y = Variable(self.converter(batch_y, self.device))
@@ -48,35 +49,35 @@ class VisEvaluator(extensions.Evaluator):
             with chainer.function.no_backprop_mode():
                 if len(models)>2:
                     x_y = models['dec_y'](models['enc_x'](x))        
-                    #x_y_x = models['dec_x'](models['enc_x'](x))    ## X => Z => X
-                    x_y_x = models['dec_x'](models['enc_y'](x_y))       ## X => Y => X
                     y_x = models['dec_x'](models['enc_y'](y))
-                    #y_x_y = models['dec_y'](models['enc_y'](y))   ## Y => Z => Y
+                    x_y_x = models['dec_x'](models['enc_y'](x_y))       ## X => Y => X
                     y_x_y = models['dec_y'](models['enc_x'](y_x)) ## Y => X => Y
+                    x_z_x = models['dec_x'](models['enc_x'](x))    ## X => Z => X
+                    y_z_y = models['dec_y'](models['enc_y'](y))   ## Y => Z => Y
                 else:
                     x_y = models['gen_g'](x)
                     x_y_x = models['gen_f'](x_y)
                     y_x = models['gen_f'](y)
                     y_x_y = models['gen_g'](y_x)
 
-#        for i, var in enumerate([x, x_y]):
-        for i, var in enumerate([x, x_y, x_y_x,  y, y_x, y_x_y]):
+        for i, var in enumerate([x, x_y, x_y_x, x_z_x, y, y_x, y_x_y, y_z_y]):
+#        for i, var in enumerate([x, x_y, x_y_x, y, y_x, y_x_y]):
             imgs = postprocess(var).astype(np.float32)
             if self.args.imgtype=='dcm' and self.args.HU_range_vis>0:
-                if (i % 2 == 0):
+                if (i in [0,2,3,5]):  # domain X
                     imgs = (imgs*self.args.HU_rangeA + self.args.HU_baseA-self.args.HU_base_vis)/self.args.HU_range_vis
                 else:
                     imgs = (imgs*self.args.HU_rangeB + self.args.HU_baseB-self.args.HU_base_vis)/self.args.HU_range_vis
-            lb = 0 if i < 3 else len(batch_x)
+            lb = 0 if i < n_col else len(batch_x)
             for j in range(len(imgs)):
                 if self.slice != None:
                     for k in self.slice:
-                        ax = fig.add_subplot(gs[(j+lb)*len(self.slice)+k,i%3])
+                        ax = fig.add_subplot(gs[(j+lb)*len(self.slice)+k,i%n_col])
                         ax.imshow(imgs[j,:,:,k], interpolation='none',cmap='gray',vmin=0,vmax=1)
                         ax.set_xticks([])
                         ax.set_yticks([])
                 else:
-                    ax = fig.add_subplot(gs[j+lb,i%3])
+                    ax = fig.add_subplot(gs[j+lb,i%n_col])
                     if(imgs[j].shape[2] == 1):
                         ax.imshow(imgs[j][:,:,0], interpolation='none',cmap='gray',vmin=0,vmax=1)
                     else:
@@ -90,9 +91,10 @@ class VisEvaluator(extensions.Evaluator):
         plt.close()
 
         cycle_y_l1 = F.mean_absolute_error(y,y_x_y)
-#        cycle_y_l2 = F.mean_squared_error(y,y_x_y)
+        cycle_y_l2 = F.mean_squared_error(y,y_x_y)
         cycle_x_l1 = F.mean_absolute_error(x,x_y_x)
+        cycle_x_l2 = F.mean_squared_error(y,y_x_y)
 #        id_xy_grad = losses.loss_grad(x,x_y)
 
-        result = {"myval/cycle_y_l1":cycle_y_l1, "myval/cycle_x_l1":cycle_x_l1}
+        result = {"myval/cycle_y_l1":cycle_y_l1, "myval/cycle_x_l1":cycle_x_l1, "myval/cycle_y_l2":cycle_y_l2, "myval/cycle_x_l2":cycle_x_l2}
         return result

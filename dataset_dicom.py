@@ -1,20 +1,21 @@
-import os
+import os,re
 import pydicom as dicom
 import random
 import glob
 
 from chainer.dataset import dataset_mixin
 import numpy as np
-#from skimage.transform import rescale
-from chainercv.transforms import random_crop,center_crop,resize
+from skimage.transform import rescale
+from chainercv.transforms import random_crop,center_crop,resize,rotate
 from consts import dtypes
 
 class Dataset(dataset_mixin.DatasetMixin):
-    def __init__(self, path, args, base, rang, random=0, mask_value=None):
+    def __init__(self, path, args, base, rang, random_tr=0, random_rot=0):
         self.path = path
         self.base = base
         self.range = rang
-        self.random = random
+        self.random_tr = random_tr
+        self.random_rot = random_rot
         self.ch = args.num_slices
         self.forceSpacing = args.forceSpacing
         self.dtype = dtypes[args.dtype]
@@ -22,7 +23,11 @@ class Dataset(dataset_mixin.DatasetMixin):
         self.dcms = []
         self.names = []
         self.idx = []
-        self.crop = (args.crop_height,args.crop_width)
+        if args.crop_height and args.crop_width:
+            self.crop = (args.crop_height,args.crop_width)
+        else:
+            self.crop=( 16*((512-2*self.random_tr)//16), 16*((512-2*self.random_tr)//16) )
+        num = lambda val : int(re.sub("\\D", "", val))
 
         print("Loading Dataset from: {}".format(path))
         dirlist = [path]
@@ -31,7 +36,7 @@ class Dataset(dataset_mixin.DatasetMixin):
                 dirlist.append(os.path.join(path,f))
         j = 0  # dir index
         for dirname in sorted(dirlist):
-            files = [os.path.join(dirname, fname) for fname in sorted(os.listdir(dirname)) if fname.endswith(args.imgtype)]
+            files = [os.path.join(dirname, fname) for fname in sorted(os.listdir(dirname), key=num) if fname.endswith(args.imgtype)]
             slices = []
             filenames = []
             loc = []
@@ -58,23 +63,22 @@ class Dataset(dataset_mixin.DatasetMixin):
                 for i in s:
                     sl = slices[i].pixel_array.astype(self.dtype)+slices[i].RescaleIntercept
                     if self.forceSpacing>0:
-                        scaling = self.forceSpacing/float(slices[i].PixelSpacing[0])
-                        sl = resize(sl[np.newaxis,],(int(scaling*sl.shape[0]),int(scaling*sl.shape[1])))[0]
-#                        volume = rescale(sl,scaling,mode="reflect",preserve_range=True)
+                        scaling = float(slices[i].PixelSpacing[0])/self.forceSpacing
+                        sl = rescale(sl,scaling,mode="reflect",preserve_range=True)
                     vollist.append(sl)
                 volume = self.img2var(np.stack(vollist))   # shape = (z,x,y)
                 print("Loaded volume {} of size {}".format(dirname,volume.shape))
-                if volume.shape[1]<self.crop[0]+2*self.random or volume.shape[2] < self.crop[1]+2*self.random:
-                    p = max(self.crop[0]+2*self.random-volume.shape[1],self.crop[1]+2*self.random-volume.shape[2])
+                if volume.shape[1]<self.crop[0]+2*self.random_tr or volume.shape[2] < self.crop[1]+2*self.random_tr:
+                    p = max(self.crop[0]+2*self.random_tr-volume.shape[1],self.crop[1]+2*self.random_tr-volume.shape[2])
                     volume = np.pad(volume,((0,0),(p,p),(p,p)),'edge')
-                volume = center_crop(volume,(self.crop[0]+2*self.random, self.crop[1]+2*self.random))
+                volume = center_crop(volume,(self.crop[0]+2*self.random_tr, self.crop[1]+2*self.random_tr))
                 self.dcms.append(volume)
                 self.names.append( [filenames[i] for i in s] )
                 self.idx.extend([(j,k) for k in range((self.ch-1)//2,len(slices)-self.ch//2)])
                 j = j + 1
 
-        print("#dir {}, #file {}, #slices {}".format(len(dirlist),len(self.idx),sum([len(fd) for fd in filenames])))
-        
+        print("#dir {}, #file {}, #slices {}".format(len(dirlist),len(self.idx),sum([len(fd) for fd in self.names])))
+
     def __len__(self):
         return len(self.idx)
 
@@ -126,4 +130,7 @@ class Dataset(dataset_mixin.DatasetMixin):
     def get_example(self, i):
         j,k = self.idx[i]
         img = self.dcms[j][(k-(self.ch-1)//2):(k+(self.ch+1)//2)]
+        ## TODO: multi channel
+        if self.random_rot>0:
+            img = rotate(img, np.random.uniform(-self.random_rot,self.random_rot),expand=False, fill=-1)
         return random_crop(img,self.crop).astype(self.dtype)

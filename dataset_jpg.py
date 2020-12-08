@@ -6,7 +6,7 @@ from chainer.dataset import dataset_mixin
 import numpy as np
 from PIL import Image
 
-from chainercv.transforms import random_crop,center_crop,random_flip
+from chainercv.transforms import random_crop,center_crop,random_flip,rotate
 from chainercv.transforms import resize
 from chainercv.utils import read_image
 
@@ -14,10 +14,11 @@ from consts import dtypes
 
 ## load images everytime from disk: slower but low memory usage
 class DatasetOutMem(dataset_mixin.DatasetMixin):
-    def __init__(self, path, args, base, rang, random=0):
+    def __init__(self, path, args, base, rang, random_tr=0, random_rot=0):
         self.path = path
         self.names = []
-        self.random = random
+        self.random_tr = random_tr
+        self.random_rot = random_rot
         self.color=not args.grey
         self.ch = 3 if self.color else 1
         self.imgtype=args.imgtype
@@ -59,13 +60,15 @@ class DatasetOutMem(dataset_mixin.DatasetMixin):
         if self.crop:
             H, W = self.crop
         else:
-            H, W = ( 16*((img.shape[1]-2*self.random)//16), 16*((img.shape[2]-2*self.random)//16) )
-        if img.shape[1]<H+2*self.random or img.shape[2] < W+2*self.random:
-            p = max(H+2*self.random-img.shape[1],W+2*self.random-img.shape[2])
+            H, W = ( 16*((img.shape[1]-2*self.random_tr)//16), 16*((img.shape[2]-2*self.random_tr)//16) )
+        if img.shape[1]<H+2*self.random_tr or img.shape[2] < W+2*self.random_tr:
+            p = max(H+2*self.random_tr-img.shape[1],W+2*self.random_tr-img.shape[2])
             img = np.pad(img,((0,0),(p,p),(p,p)),'edge')
-        img = random_crop(center_crop(img, (H+2*self.random,W+2*self.random)),(H,W))
-        if self.random:
+        img = random_crop(center_crop(img, (H+2*self.random_tr,W+2*self.random_tr)),(H,W))
+        if self.random_tr:
             img = random_flip(img, x_random=True)
+        if self.random_rot>0:
+            img = rotate(img, np.random.uniform(-self.random_rot,self.random_rot),expand=False, fill=-1)
         return img.astype(self.dtype)
 
     def mask(self,fn):

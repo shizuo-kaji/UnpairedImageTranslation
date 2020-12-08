@@ -10,7 +10,6 @@ warnings.filterwarnings("ignore")
 
 import argparse
 import os,glob
-import json,codecs
 import cv2
 from datetime import datetime as dt
 import time
@@ -19,13 +18,13 @@ import net
 import random
 import chainer
 import chainer.functions as F
+import chainer.links as L
 from chainer import serializers, Variable, cuda
 from chainercv.utils import write_image
 from chainercv.transforms import resize
 from chainerui.utils import save_args
 from arguments import arguments 
 from consts import dtypes
-from chainer.links import VGG16Layers
 
 def gradimg(img):
     grad = xp.tile(xp.asarray([[[[1,0,-1],[2,0,-2],[1,0,-1]]]],dtype=img.dtype),(img.array.shape[1],1,1))
@@ -44,67 +43,65 @@ def heatmap(heat,src):  ## heat [0,1], src [-1,1] grey
 
 if __name__ == '__main__':
     args = arguments()
-    args.suffix = "out"
+    args.random_translate = 0 ## necessary to infer crop size
     outdir = os.path.join(args.out, dt.now().strftime('out_%m%d_%H%M'))
 
-    args.gpu = args.gpu[0]
-    if args.gpu >= 0:
-        cuda.get_device_from_id(args.gpu).use()
+    if args.gpu[0] >= 0:
+        cuda.get_device_from_id(args.gpu[0]).use()
         print('use gpu {}'.format(args.gpu))
 
-    ## load arguments from "arg" file used in training
-    if args.argfile:
-        with open(args.argfile, 'r') as f:
-            larg = json.load(f)
-            root=os.path.dirname(args.argfile)
-            for x in ['HU_baseA','HU_rangeA','forceSpacing','perceptual_layer','num_slices','out_ch','grey',
-              'dis_norm','dis_activation','dis_out_activation','dis_chs','dis_ksize','dis_sample','dis_down','dis_reg_weighting','dis_wgan','dis_attention',
-              'gen_norm','gen_activation','gen_out_activation','gen_nblock','gen_chs','gen_sample','gen_down','gen_up','gen_ksize','unet','skipdim','latent_dim',
-              'gen_fc','gen_fc_activation','spconv','eqconv','senet','dtype']:
-                if x in larg:
-                    setattr(args, x, larg[x])
-            for x in ['imgtype','crop_width','crop_height']:
-                if not getattr(args, x):
-                    setattr(args, x, larg[x])
-            if not args.load_models:
-                if larg["epoch"]:
-                    args.load_models=os.path.join(root,'enc_x{}.npz'.format(larg["epoch"]))
-                    
-    args.random_translate = 0
-    save_args(args, outdir)
-    print(args)
     # Enable autotuner of cuDNN
     chainer.config.autotune = True
     chainer.config.dtype = dtypes[args.dtype]
 
+    # infer model names
+    if not args.load_models:
+        root=os.path.dirname(args.argfile)
+        args.load_models=os.path.join(root,'enc_x{}.npz'.format(args.epoch))
+                    
     ## load images
     if args.imgtype=="dcm":
         from dataset_dicom import Dataset as Dataset
-        args.grey = True
     else:
         from dataset_jpg import DatasetOutMem as Dataset   
 
-    ## compatibility
-    if not hasattr(args,'out_ch'):
-        args.out_ch = 1 if args.grey else 3
+    dataset = Dataset(path=args.root, args=args, base=args.HU_baseA, rang=args.HU_rangeA)
+    if args.ch != dataset.ch:
+        print("number of input channels is different during training.")
+    print("Input channels {}, Output channels {}".format(args.ch,args.out_ch))
 
-    dataset = Dataset(path=args.root, args=args, base=args.HU_baseA, rang=args.HU_rangeA, random=0)
-    args.ch = dataset.ch
+    print(args)
+    save_args(args, outdir)
+
 #    iterator = chainer.iterators.MultiprocessIterator(dataset, args.batch_size, n_processes=3, repeat=False, shuffle=False)
     iterator = chainer.iterators.MultithreadIterator(dataset, args.batch_size, n_threads=3, repeat=False, shuffle=False)   ## best performance
 #    iterator = chainer.iterators.SerialIterator(dataset, args.batch_size,repeat=False, shuffle=False)
+
+    # shared pretrained layer
+    if (args.gen_pretrained_encoder and args.gen_pretrained_lr_ratio == 0):
+            if "resnet" in args.gen_pretrained_encoder:
+                pretrained = L.ResNet50Layers()
+                print("Pretrained ResNet model loaded.")
+            else:
+                pretrained = L.VGG16Layers()
+                print("Pretrained VGG model loaded.")
+            if args.gpu[0] >= 0:
+                pretrained.to_gpu()
 
     ## load generator models
     if "gen" in args.load_models:
             gen = net.Generator(args)
             print('Loading {:s}..'.format(args.load_models))
             serializers.load_npz(args.load_models, gen)
-            if args.gpu >= 0:
+            if args.gpu[0] >= 0:
                 gen.to_gpu()
             xp = gen.xp
             is_AE = False
     elif "enc" in args.load_models:
-        enc = net.Encoder(args)
+        if (args.gen_pretrained_encoder and args.gen_pretrained_lr_ratio == 0) :
+            enc = net.Encoder(args, pretrained)
+        else:
+            enc = net.Encoder(args)
         print('Loading {:s}..'.format(args.load_models))
         serializers.load_npz(args.load_models, enc)
         dec = net.Decoder(args)
@@ -112,7 +109,7 @@ if __name__ == '__main__':
         modelfn = modelfn.replace('enc_y','dec_x')
         print('Loading {:s}..'.format(modelfn))
         serializers.load_npz(modelfn, dec)
-        if args.gpu >= 0:
+        if args.gpu[0] >= 0:
             enc.to_gpu()
             dec.to_gpu()
         xp = enc.xp
@@ -125,7 +122,7 @@ if __name__ == '__main__':
 
     ## prepare networks for analysis 
     if args.output_analysis:
-        vgg = VGG16Layers()  # for perceptual loss
+        vgg = L.VGG16Layers()  # for perceptual loss
         vgg.to_gpu()
         if is_AE:
             enc_i = net.Encoder(args)
@@ -152,7 +149,7 @@ if __name__ == '__main__':
             if os.path.exists(path):
                 print('Loading {:s}..'.format(path))
                 serializers.load_npz(path, models[e])
-                if args.gpu >= 0:
+                if args.gpu[0] >= 0:
                     models[e].to_gpu()
         
 
@@ -163,7 +160,7 @@ if __name__ == '__main__':
     cnt = 0
     prevdir = "RaNdOmDir"
     for batch in iterator:
-        imgs = Variable(chainer.dataset.concat_examples(batch, device=args.gpu))
+        imgs = Variable(chainer.dataset.concat_examples(batch, device=args.gpu[0]))
         with chainer.using_config('train', False),chainer.function.no_backprop_mode():
             if is_AE:
                 out = dec(enc(imgs))
@@ -217,7 +214,6 @@ if __name__ == '__main__':
             new = dataset.var2img(out[i]) 
             print("raw value: {} {}".format(np.min(out[i]),np.max(out[i])))
             #print(new.shape)
-            h,w = dataset.crop
 
             # converted image
             if args.imgtype=="dcm":
@@ -226,10 +222,10 @@ if __name__ == '__main__':
                     prevdir = dname
                 for j in range(args.num_slices):
                     ref_dicom = dataset.overwrite(new[j],cnt,salt)
-                    path = os.path.join(outdir,'{:s}_{}_{}.dcm'.format(fn,args.suffix,j))
+                    path = os.path.join(outdir,'{:s}_out_{}.dcm'.format(fn,j))
                     ref_dicom.save_as(path)
             else:
-                path = os.path.join(outdir,'{:s}_{}.jpg'.format(fn,args.suffix))
+                path = os.path.join(outdir,'{:s}_out.jpg'.format(fn))
                 write_image(new, path)
 
             ## images for analysis

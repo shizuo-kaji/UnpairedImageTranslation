@@ -2,7 +2,6 @@ import random
 import chainer
 import chainer.functions as F
 from chainer import Variable,cuda
-from chainer.links import VGG16Layers
 import losses
 
 class Updater(chainer.training.StandardUpdater):
@@ -15,18 +14,16 @@ class Updater(chainer.training.StandardUpdater):
         self.xp = self.enc_x.xp
         self._buffer_y = losses.ImagePool(50 * self.args.batch_size)
         self._buffer_x = losses.ImagePool(50 * self.args.batch_size)
-        if self.args.lambda_identity_x > 0 or self.args.lambda_identity_y > 0:
-            self.vgg = VGG16Layers()  # for perceptual loss
-            self.vgg.to_gpu()
+        self.perceptual_model = params['perceptual_model']
 
     def update_core(self):
-        opt_enc_x = self.get_optimizer('opt_enc_x')
-        opt_dec_x = self.get_optimizer('opt_dec_x')
-        opt_enc_y = self.get_optimizer('opt_enc_y')
-        opt_dec_y = self.get_optimizer('opt_dec_y')
-        opt_x = self.get_optimizer('opt_x')
-        opt_y = self.get_optimizer('opt_y')
-        opt_z = self.get_optimizer('opt_z')
+        opt_enc_x = self.get_optimizer('enc_x')
+        opt_dec_x = self.get_optimizer('dec_x')
+        opt_enc_y = self.get_optimizer('enc_y')
+        opt_dec_y = self.get_optimizer('dec_y')
+        opt_x = self.get_optimizer('dis_x')
+        opt_y = self.get_optimizer('dis_y')
+        opt_z = self.get_optimizer('dis_z')
 
         # get mini-batch
         batch_x = self.get_iterator('main').next()
@@ -120,24 +117,24 @@ class Updater(chainer.training.StandardUpdater):
 
         ## images before/after conversion should look similar in terms of perceptual loss
         if self.args.lambda_identity_x > 0:
-            loss_id_x = losses.loss_perceptual(x,x_y,self.vgg,layer=self.args.perceptual_layer,grey=self.args.grey)
+            loss_id_x = losses.loss_perceptual(x,x_y,self.perceptual_model,layer=self.args.perceptual_layer,grey=self.args.grey)
             loss_gen = loss_gen + self.args.lambda_identity_x * loss_id_x
             chainer.report({'loss_id': 1e-3*loss_id_x}, self.enc_x)
         if self.args.lambda_identity_y > 0:
-            loss_id_y = losses.loss_perceptual(y,y_x,self.vgg,layer=self.args.perceptual_layer,grey=self.args.grey)
+            loss_id_y = losses.loss_perceptual(y,y_x,self.perceptual_model,layer=self.args.perceptual_layer,grey=self.args.grey)
             loss_gen = loss_gen + self.args.lambda_identity_y * loss_id_y
             chainer.report({'loss_id': 1e-3*loss_id_y}, self.enc_y)
         ## background (pixels with value -1) should be preserved
         if self.args.lambda_air > 0:
-            loss_air_x = losses.loss_comp_low(x,x_y,self.args.air_threshold,norm='l2')
-            loss_air_y = losses.loss_comp_low(y,y_x,self.args.air_threshold,norm='l2')
+            loss_air_x = losses.loss_comp_low(x,x_y,self.args.air_threshold,norm='l1')
+            loss_air_y = losses.loss_comp_low(y,y_x,self.args.air_threshold,norm='l1')
             loss_gen = loss_gen + self.args.lambda_air * (loss_air_x+loss_air_y)
             chainer.report({'loss_air': loss_air_x}, self.dec_y)
             chainer.report({'loss_air': loss_air_y}, self.dec_x)
         ## images before/after conversion should look similar in the gradient domain
         if self.args.lambda_grad > 0:
-            loss_grad_x = losses.loss_grad(x,x_y)
-            loss_grad_y = losses.loss_grad(y,y_x)
+            loss_grad_x = losses.loss_grad(x,x_y,norm='l1')
+            loss_grad_y = losses.loss_grad(y,y_x,norm='l1')
             loss_gen = loss_gen + self.args.lambda_grad * (loss_grad_x + loss_grad_y)
             chainer.report({'loss_grad': loss_grad_x}, self.dec_y)
             chainer.report({'loss_grad': loss_grad_y}, self.dec_x)
@@ -222,10 +219,9 @@ class Updater(chainer.training.StandardUpdater):
                 else:
                     loss_dis_y_reg = 0
                 chainer.report({'loss_reg': loss_dis_y_reg}, self.dis_y)
-                loss_dis_y_gp = 0
                 chainer.report({'loss_fake': loss_dis_y_fake}, self.dis_y)
                 chainer.report({'loss_real': loss_dis_y_real}, self.dis_y)
-                loss_dis_y = (loss_dis_y_fake + loss_dis_y_real) * 0.5 + self.args.dis_reg_weighting * loss_dis_y_reg + self.args.lambda_wgan_gp * loss_dis_y_gp
+                loss_dis_y = (loss_dis_y_fake + loss_dis_y_real) * 0.5 + self.args.dis_reg_weighting * loss_dis_y_reg
                 self.dis_y.cleargrads()
                 loss_dis_y.backward()
                 opt_y.update(loss=loss_dis_y)
@@ -241,10 +237,9 @@ class Updater(chainer.training.StandardUpdater):
                 else:
                     loss_dis_x_reg = 0
                 chainer.report({'loss_reg': loss_dis_x_reg}, self.dis_x)
-                loss_dis_x_gp = 0
                 chainer.report({'loss_fake': loss_dis_x_fake}, self.dis_x)
                 chainer.report({'loss_real': loss_dis_x_real}, self.dis_x)
-                loss_dis_x = (loss_dis_x_fake + loss_dis_x_real) * 0.5 + self.args.dis_reg_weighting * loss_dis_x_reg + self.args.lambda_wgan_gp * loss_dis_x_gp
+                loss_dis_x = (loss_dis_x_fake + loss_dis_x_real) * 0.5 + self.args.dis_reg_weighting * loss_dis_x_reg
                 self.dis_x.cleargrads()
                 loss_dis_x.backward()
                 opt_x.update(loss=loss_dis_x)

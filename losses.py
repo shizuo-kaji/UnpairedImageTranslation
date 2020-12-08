@@ -88,7 +88,7 @@ def loss_avg(x,y, ksize=3, norm='l2', weight=None):
 
 ## apply pre-trained CNN and take difference
 def loss_perceptual(x,y,model,layer='conv4_2',grey=False):
-    with chainer.using_config('train', False):
+    with chainer.using_config('train', False) and chainer.no_backprop_mode():
         if grey:
             loss = 0
             for i in range(x.shape[1]):
@@ -105,14 +105,14 @@ def loss_perceptual(x,y,model,layer='conv4_2',grey=False):
             loss = F.mean_squared_error(vx,vy)
     return(loss)
 
-## apply Sobel's filter and take difference
+## compute gradient and take difference
 def loss_grad(x, y, method='diff',norm='l1'):
     if method=="diff":
         dxx = x[:, :, 1:, :] - x[:, :, :-1, :]
         dyx = y[:, :, 1:, :] - y[:, :, :-1, :]
         dxy = x[:, :, :, 1:] - x[:, :, :, :-1]
         dyy = y[:, :, :, 1:] - y[:, :, :, :-1]
-    elif method=="sobel":
+    elif method=="sobel": # apply Sobel's filter
         xp = cuda.get_array_module(x.data)
         grad = xp.tile(xp.asarray([[[[1,0,-1],[2,0,-2],[1,0,-1]]]],dtype=x.dtype),(x.data.shape[1],1,1))
         dxx = F.convolution_2d(x,grad)
@@ -125,8 +125,8 @@ def loss_grad(x, y, method='diff',norm='l1'):
         return F.mean_squared_error(dxx,dyx)+F.mean_squared_error(dxy,dyy)
 
 # compare only pixels with x < threshold.
-def loss_comp_low(x,y,threshold,norm='l2'):
-    mask = ((x.array <= threshold)^(y.array <= threshold)).astype(x.xp.float32)
+def loss_comp_low(x,y,threshold,norm='l1'):
+    mask = ((x.array <= threshold)^(y.array <= threshold)).astype(x.xp.float32) ## XOR
     if norm=='l1':
         return(F.average( mask * F.absolute_error(x,y) ))
     else:
@@ -153,7 +153,7 @@ def loss_func_reg(y,norm='l1'):
     else:
         return(F.average(y**2))
 
-def total_variation(x,tau=1e-6, method="abs"):
+def total_variation(x,tau=1e-6, method="usual"):
     xp = cuda.get_array_module(x.data)
     if method=="abs":
         dx = x[:, :, 1:, :] - x[:, :, :-1, :]

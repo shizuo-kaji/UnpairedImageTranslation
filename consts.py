@@ -48,7 +48,7 @@ def feature_vector_normalization(x, eps=1e-8):
 
 norm_layer = {
     'none': lambda x: F.identity,
-    'batch': functools.partial(L.BatchNormalization, use_gamma=False, use_beta=True),
+    'batch': functools.partial(L.BatchNormalization, use_gamma=False, use_beta=False),
     'batch_aff': functools.partial(L.BatchNormalization, use_gamma=True, use_beta=True),
     'layer': L.LayerNormalization,
     'rbatch': functools.partial(L.BatchRenormalization, use_gamma=False, use_beta=True),
@@ -58,6 +58,5 @@ norm_layer = {
 try:
     from instance_normalization import InstanceNormalization
     norm_layer['instance'] = functools.partial(InstanceNormalization, use_gamma=False, use_beta=False)
-    norm_layer['instance_aff'] = functools.partial(InstanceNormalization, use_gamma=True, use_beta=False)
 except:
     pass

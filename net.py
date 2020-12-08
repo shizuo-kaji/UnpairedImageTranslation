@@ -165,8 +165,7 @@ class ResBlock(chainer.Chain):
         h = self.activation(h)
         h = self.c1(h)
         h = self.norm1(h)
-        h = h + self.cs(x)
-        return h
+        return h + self.cs(x)
 
 
 class CBR(chainer.Chain):
@@ -215,20 +214,17 @@ class CBR(chainer.Chain):
 
     def __call__(self, x):
 #        print("*:",x.shape)
-        h = self.c1(x)
-        h = self.n1(h)
-        if self.activation is not None:
+        h = self.n1(self.c1(x))
+        if hasattr(self,'c2') and self.activation is not None:
             h = self.activation(h)
-
         if hasattr(self,'d'):
             h = self.d(h)
         if hasattr(self,'c2'):
-            h = self.c2(h)
-            h = self.n2(h)
-            if self.activation is not None:
-                h = self.activation(h)
+            h = self.n2(self.c2(h))
         if self.dropout:
             h = F.dropout(h, ratio=self.dropout)
+        if self.activation is not None:
+            h = self.activation(h)
         if hasattr(self, 'skip'):
             h = h + self.skip(x)
         if hasattr(self, 'u'):
@@ -249,6 +245,7 @@ class LBR(chainer.Chain):
     def __call__(self, x):
         h = self.l0(x)
         h = self.norm(h)
+#        print(F.max(h))  # bug? we always get zero if a normalization is applied
         if self.dropout:
             h = F.dropout(h, ratio=self.dropout)
         if self.activation is not None:
@@ -256,7 +253,7 @@ class LBR(chainer.Chain):
         return h
 
 class Encoder(chainer.Chain):
-    def __init__(self, args):
+    def __init__(self, args, pretrained_model=None):
         super(Encoder, self).__init__()
         self.n_resblock = (args.gen_nblock+1) // 2 # half for Enc and half for Dec
         self.chs = args.gen_chs
@@ -265,15 +262,40 @@ class Encoder(chainer.Chain):
         else:
             self.unet = 'none'
         self.nfc = args.gen_fc
+        if pretrained_model:
+            self.base=pretrained_model
+            self.update_base = False
+
         with self.init_scope():
             for i in range(args.gen_fc):
                 self.in_c = args.ch
                 self.in_h = args.crop_height
                 self.in_w = args.crop_width
+#                print(args.ch,args.crop_height,args.crop_width)
                 setattr(self, 'l' + str(i), LBR(args.crop_height*args.crop_width*args.ch, activation=args.gen_fc_activation))
-            self.c0 = CBR(args.ch, self.chs[0], norm=args.gen_norm, sample=args.gen_sample, activation=args.gen_activation, equalised=args.eqconv)
-            for i in range(1,len(self.chs)):
-                setattr(self, 'd' + str(i), CBR(self.chs[i-1], self.chs[i], ksize=args.gen_ksize, norm=args.gen_norm, sample=args.gen_down, activation=args.gen_activation, dropout=args.gen_dropout, equalised=args.eqconv, separable=args.spconv))
+
+            ## use pretrained network
+            if hasattr(args,'gen_pretrained_encoder') and args.gen_pretrained_encoder:
+                self.pretrained = True
+                if "resnet" in args.gen_pretrained_encoder:
+                    self.layers = ['conv1']
+                    for i in range(2,args.gen_ndown+1):
+                        self.layers.append('res{}'.format(i))
+                else: ## VGG16
+                    self.layers = ['conv{}_2'.format(i) for i in range(1,min(3,args.gen_ndown+1))]
+                    self.layers.extend(['conv{}_3'.format(i) for i in range(3,args.gen_ndown+1)])
+                if pretrained_model is None:
+                    if "resnet" in args.gen_pretrained_encoder:
+                        self.base = L.ResNet50Layers()
+                    else:
+                        self.base = L.VGG16Layers()
+#                print(self.chs, self.layers)
+            else:  ## new network
+                self.pretrained = False
+                self.c0 = CBR(args.ch, self.chs[0], norm=args.gen_norm, sample=args.gen_sample, activation=args.gen_activation, equalised=args.eqconv)
+                for i in range(1,len(self.chs)):
+                    setattr(self, 'd' + str(i), CBR(self.chs[i-1], self.chs[i], ksize=args.gen_ksize, norm=args.gen_norm, sample=args.gen_down, activation=args.gen_activation, dropout=args.gen_dropout, equalised=args.eqconv, separable=args.spconv))
+            ## common part
             if self.unet=='conv':
                 for i in range(len(self.chs)):
                     setattr(self, 's' + str(i), CBR(self.chs[i], args.skipdim, ksize=3, norm=args.gen_norm, sample='none', equalised=args.eqconv))
@@ -284,30 +306,56 @@ class Encoder(chainer.Chain):
 
     def __call__(self, x):
         h = x
+        ## precomposed-FC layers (AUTOMAP)
         for i in range(self.nfc):
             h=F.reshape(getattr(self, 'l' + str(i))(h),(-1,self.in_c,self.in_h,self.in_w))
-        e = self.c0(x)
-        if self.unet=='conv':
-            h = [self.s0(e)]
-        elif self.unet in ['concat','add']:
-            h = [e]
-        else:
-            h=[0]
-        for i in range(1,len(self.chs)):
-            e = getattr(self, 'd' + str(i))(e)
-            if self.unet=='conv':
-                h.append(getattr(self, 's' + str(i))(e))
-            elif self.unet in ['concat','add']:
-                h.append(e)
+        ## down layers
+        if self.pretrained:
+            if h.shape[1]==1:
+                e = F.concat([h,h,h])
             else:
-                h.append(0)
-#            print(h[-1].data.shape)
-#        e = F.max_pooling_2d(e,2,2)
+                e = h
+            if self.update_base:
+                zz = self.base(e, layers=self.layers)
+            else:
+                with chainer.using_config('train', False) and chainer.no_backprop_mode():
+                    zz = self.base(e, layers=self.layers)
+            h = []
+            for i,layer in enumerate(self.layers):
+                if self.unet=='conv':
+                    f = getattr(self, 's' + str(i))
+                    h.append(f(zz[layer]))
+                elif self.unet in ['concat','add']:
+                    h.append(zz[layer])
+                else:
+                    h.append(0)
+            e = zz[self.layers[-1]]
+        else:
+            e = self.c0(h)
+            if self.unet=='conv':
+                h = [self.s0(e)]
+            elif self.unet in ['concat','add']:
+                h = [e]
+            else:
+                h=[0]
+            for i in range(1,len(self.chs)):
+                e = getattr(self, 'd' + str(i))(e)
+                if self.unet=='conv':
+                    h.append(getattr(self, 's' + str(i))(e))
+                elif self.unet in ['concat','add']:
+                    h.append(e)
+                else:
+                    h.append(0)
+
+        ## residual blocks
         for i in range(self.n_resblock):
             e = getattr(self, 'r' + str(i))(e)
         h.append(e)
+        
+        ## post-composed FC layer
         if hasattr(self,'latent_fc'):
             h.append(self.latent_fc(e))
+#        print([e.shape for e in h])
         return h
 
 class Decoder(chainer.Chain):
@@ -315,9 +363,10 @@ class Decoder(chainer.Chain):
         super(Decoder, self).__init__()
         self.n_resblock = args.gen_nblock // 2 # half for Enc and half for Dec
         self.chs = args.gen_chs
-        self.latent_c = args.gen_chs[-1]
-        self.latent_h = args.crop_height//(2**(len(args.gen_chs)-1))
-        self.latent_w = args.crop_width//(2**(len(args.gen_chs)-1))
+        if hasattr(args,'noise_z'):
+            self.noise_z = args.noise_z
+        else:
+            self.noise_z = 0
         if hasattr(args,'unet'):
             self.unet = args.unet
         else:
@@ -330,29 +379,34 @@ class Decoder(chainer.Chain):
             up_chs = self.chs
         with self.init_scope():
             if hasattr(args,'latent_dim') and args.latent_dim>0:
+                self.latent_c = args.gen_chs[-1]
+                self.latent_h = args.crop_height//(2**(len(args.gen_chs)-1))
+                self.latent_w = args.crop_width//(2**(len(args.gen_chs)-1))
                 print("Latent dimensions: ",self.latent_c,self.latent_h,self.latent_w)
-                self.latent_fc = L.Linear(None, self.latent_c*self.latent_h*self.latent_w)
-                self.latent_n = norm_layer[args.gen_norm](self.latent_c)
-                self.latent_ac = activation_func[args.gen_fc_activation]
+                self.latent_fc = LBR(self.latent_c*self.latent_h*self.latent_w, activation=args.gen_fc_activation)
             for i in range(self.n_resblock):
                 setattr(self, 'r' + str(i), ResBlock(self.chs[-1], norm=args.gen_norm, activation=args.gen_activation, equalised=args.eqconv, separable=args.spconv))
             for i in range(1,len(self.chs)):
                 setattr(self, 'ua' + str(i), CBR(up_chs[-i], self.chs[-i-1], ksize=args.gen_ksize, norm=args.gen_norm, sample=args.gen_up, activation=args.gen_activation, dropout=args.gen_dropout, equalised=args.eqconv, separable=args.spconv))
-            setattr(self, 'ua'+str(len(self.chs)),CBR(up_chs[0], up_chs[0], norm='none', sample='none', activation=args.gen_activation, equalised=args.eqconv, separable=args.spconv))
-            setattr(self, 'ul',CBR(up_chs[0], args.ch, norm='none', sample=args.gen_sample, activation=args.gen_out_activation, equalised=args.eqconv, separable=args.spconv))
+            if hasattr(args,'gen_pretrained_encoder') and "resnet" in args.gen_pretrained_encoder:
+                setattr(self, 'ua'+str(len(self.chs)),CBR(up_chs[0], up_chs[0], norm=args.gen_norm, sample='resize', activation=args.gen_activation, equalised=args.eqconv, separable=args.spconv))
+            else:
+                setattr(self, 'ua'+str(len(self.chs)),CBR(up_chs[0], up_chs[0], norm=args.gen_norm, sample='none', activation=args.gen_activation, equalised=args.eqconv, separable=args.spconv))
+            setattr(self, 'ul',CBR(up_chs[0], args.out_ch, norm='none', sample=args.gen_sample, activation=args.gen_out_activation, equalised=args.eqconv, separable=args.spconv))
 
     def __call__(self, h):
         if isinstance(h,list):
             e = h[-1]
         else:
             e = h
+        if chainer.config.train and self.noise_z>0:   ## noise injection for latent
+            e.data += self.noise_z * e.xp.random.randn(*e.data.shape, dtype=e.dtype)
         if hasattr(self,'latent_fc'):
             e = F.reshape(self.latent_fc(e),(-1,self.latent_c,self.latent_h,self.latent_w))
-            e = self.latent_ac(self.latent_n(e))
         for i in range(self.n_resblock):
             e = getattr(self, 'r' + str(i))(e)
-#        e = bilinear_upsampling(e)
         for i in range(1,len(self.chs)+1):
+#            print(e.shape,h[-i-1].shape)
             if self.unet in ['conv','concat']:
                 e = getattr(self, 'ua' + str(i))(F.concat([e,h[-i-1]]))
             elif self.unet=='add':
@@ -362,51 +416,86 @@ class Decoder(chainer.Chain):
         e = self.ul(e)
         return e
 
+
 class Generator(chainer.Chain):
-    def __init__(self, args):
+    def __init__(self, args, pretrained_model=None):
         super(Generator, self).__init__()
-        if hasattr(args,'noise_z'):
-            self.noise_z = args.noise_z
-        else:
-            self.noise_z = 0
         with self.init_scope():
-            self.encoder = Encoder(args)
+            self.encoder = Encoder(args, pretrained_model=pretrained_model)
             self.decoder = Decoder(args)
     def __call__(self, x):
+#        print(self.encoder.base.conv1_1.W.update_rule.hyperparam.eta,self.decoder.ua1.c1.c.W.update_rule.hyperparam.eta)
         h = self.encoder(x)
-        if chainer.config.train and self.noise_z>0:
-            h.data += self.noise_z * h.xp.random.randn(*h.data.shape, dtype=h.dtype)
         return self.decoder(h)
 
 class Discriminator(chainer.Chain):
-    def __init__(self, args):
+    def __init__(self, args, pretrained_model=None, pretrained_off=False):
         super(Discriminator, self).__init__()
         self.n_down_layers = args.dis_ndown
         self.activation = args.dis_activation
         self.wgan = args.dis_wgan
         self.chs = args.dis_chs
         self.attention = args.dis_attention
+        pad = args.dis_ksize//2
         dis_out = 2 if args.dis_reg_weighting>0 else 1  ## weighted discriminator
+        if pretrained_model:
+            self.base=pretrained_model
+            self.update_base = False
+
         with self.init_scope():
-            self.c0 = CBR(None, self.chs[0], ksize=args.dis_ksize, norm='none', 
-                          sample=args.dis_sample, activation=args.dis_activation,dropout=args.dis_dropout, equalised=args.eqconv,senet=args.senet) #separable=args.spconv)
-            for i in range(1, len(self.chs)):
-                setattr(self, 'c' + str(i),
-                        CBR(self.chs[i-1], self.chs[i], ksize=args.dis_ksize, norm=args.dis_norm,
-                            sample=args.dis_down, activation=args.dis_activation, dropout=args.dis_dropout, equalised=args.eqconv, separable=args.spconv, senet=args.senet))
-            self.csl = CBR(self.chs[-1], 2*self.chs[-1], ksize=args.dis_ksize, norm=args.dis_norm, sample='none', activation=args.dis_activation, dropout=args.dis_dropout, equalised=args.eqconv, separable=args.spconv, senet=args.senet)
+            if hasattr(args,'dis_pretrained') and args.dis_pretrained and not pretrained_off:
+                self.pretrained = True
+                if "resnet" in args.dis_pretrained:
+                    if args.dis_ndown==1:
+                        self.layers = ['conv1']
+                    else:
+                        self.layers = ['res{}'.format(args.dis_ndown)]
+                else: ## VGG16
+                    if args.dis_ndown < 3:
+                        self.layers = ['conv{}_2'.format(args.dis_ndown)]
+                    else:
+                        self.layers = ['conv{}_3'.format(args.dis_ndown)]
+                if pretrained_model is None:
+                    if "resnet" in args.dis_pretrained:
+                        self.base = L.ResNet50Layers()
+                    else:
+                        self.base = L.VGG16Layers()
+#                print(self.chs, self.layers)
+            else:  ## new network
+                self.pretrained = False
+                self.c0 = CBR(None, self.chs[0], ksize=args.dis_ksize, pad=pad, norm='none', 
+                            sample=args.dis_sample, activation=args.dis_activation,dropout=args.dis_dropout, equalised=args.eqconv,senet=args.senet) #separable=args.spconv)
+                for i in range(1, len(self.chs)):
+                    setattr(self, 'c' + str(i),
+                            CBR(self.chs[i-1], self.chs[i], ksize=args.dis_ksize, pad=pad, norm=args.dis_norm,
+                                sample=args.dis_down, activation=args.dis_activation, dropout=args.dis_dropout, equalised=args.eqconv, separable=args.spconv, senet=args.senet))
+            ## common                                
+            self.csl = CBR(self.chs[-1], 2*self.chs[-1], ksize=args.dis_ksize, pad=pad, norm=args.dis_norm, sample='none', activation=args.dis_activation, dropout=args.dis_dropout, equalised=args.eqconv, separable=args.spconv, senet=args.senet)
             if self.attention:
                 setattr(self, 'a',  NonLocalBlock(2*self.chs[-1]))
             if self.wgan:
                 self.fc1 = LBR(1024, activation='relu')
                 self.fc2 = L.Linear(None, 1)
             else:
-                self.cl = CBR(2*self.chs[-1], dis_out, ksize=args.dis_ksize, norm='none', sample='none', activation='none', dropout=False, equalised=args.eqconv, separable=args.spconv, senet=args.senet)
+                self.cl = CBR(2*self.chs[-1], dis_out, ksize=args.dis_ksize, pad=pad, norm='none', sample='none', activation='none', dropout=False, equalised=args.eqconv, separable=args.spconv, senet=args.senet)
 
     def __call__(self, x):
-        h = self.c0(x)
-        for i in range(1, len(self.chs)):
-            h = getattr(self, 'c' + str(i))(h)
+        if self.pretrained:
+            if x.shape[1]==1:
+                h = F.concat([x,x,x])
+            else:
+                h = x
+            if self.update_base:
+                zz = self.base(h, layers=self.layers)
+            else:
+                with chainer.using_config('train', False) and chainer.no_backprop_mode():
+                    zz = self.base(h, layers=self.layers)
+            h = zz[self.layers[-1]]
+        else:
+            h = self.c0(x)
+            for i in range(1, len(self.chs)):
+                h = getattr(self, 'c' + str(i))(h)
+
         h = self.csl(h)
         if self.attention:
             h = getattr(self, 'a')(h)
