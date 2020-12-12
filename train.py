@@ -42,8 +42,7 @@ def main():
 
     # CUDA
     if not chainer.cuda.available:
-        print("CUDA required")
-        exit()
+        print("This program runs hopelessly slow without CUDA!!")
     if len(args.gpu)==1 and args.gpu[0] >= 0:
         chainer.cuda.get_device_from_id(args.gpu[0]).use()
 

@@ -193,7 +193,7 @@ class Updater(chainer.training.StandardUpdater):
                 opt_x.update(loss=loss_dis_x)
 
             ## discriminator for latent: X -> Z is - while Y -> Z is +
-            if self.args.lambda_dis_z>0 and t==0:
+            if self.args.lambda_dis_z>0:
                 loss_dis_z = F.average(self.dis_z(x_z[-1])-self.dis_z(y_z[-1]))
                 z_mid = eps * x_z[-1] + (1.0 - eps) * y_z[-1]
                 # gradient penalty
@@ -207,7 +207,7 @@ class Updater(chainer.training.StandardUpdater):
                 loss_dis_z.backward()
                 opt_z.update(loss=loss_dis_z)
 
-        else:  ## LSGAN
+        elif(self.iteration % self.args.learning_freq_d == 0):  ## LSGAN
             if self.args.lambda_dis_y>0:
                 ## discriminator for A=>B (real:1, fake:0)
                 disy_fake = self.dis_y(x_y_copy)

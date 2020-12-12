@@ -400,7 +400,7 @@ class Decoder(chainer.Chain):
         else:
             e = h
         if chainer.config.train and self.noise_z>0:   ## noise injection for latent
-            e.data += self.noise_z * e.xp.random.randn(*e.data.shape, dtype=e.dtype)
+            e.data += self.noise_z * e.xp.random.randn(*e.data.shape).astype(e.dtype)
         if hasattr(self,'latent_fc'):
             e = F.reshape(self.latent_fc(e),(-1,self.latent_c,self.latent_h,self.latent_w))
         for i in range(self.n_resblock):

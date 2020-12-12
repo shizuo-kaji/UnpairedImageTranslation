@@ -7,7 +7,7 @@ from datetime import datetime as dt
 import json,codecs
 
 default_values = {'root': 'data', 'batch_size': 1, 'gpu': [0], 'out': 'result', 'imgtype': 'jpg', \
-    'learning_rate': None, 'learning_rate_g': 2e-4, 'learning_rate_d': 1e-4, 'lr_drop': 1, 'epoch': 50, 'iteration': None, \
+    'learning_rate': None, 'learning_rate_g': 2e-4, 'learning_rate_d': 1e-4, 'learning_freq_d': 1, 'lr_drop': 1, 'epoch': 50, 'iteration': None, \
     'snapinterval': -1, 'weight_decay': 1e-7, 'optimizer': 'Adam', \
     'crop_width': None, 'crop_height': None, 'grey': None, 'dtype': 'fp32', 'load_optimizer': False, \
     'eqconv': False, 'spconv': False, 'senet': False, \
@@ -39,6 +39,7 @@ def arguments():
     parser.add_argument('--learning_rate', '-lr', type=float, help='Learning rate')
     parser.add_argument('--learning_rate_g', '-lrg', type=float, help='Learning rate for generator')
     parser.add_argument('--learning_rate_d', '-lrd', type=float, help='Learning rate for discriminator')
+    parser.add_argument('--learning_freq_d', '-lfd', type=int, help='Learning frequency for discriminator')
     parser.add_argument('--lr_drop', type=int, help='How many times the learning rate drops in cosine annealing. Set to 0 for linear lr decay.')
     parser.add_argument('--epoch', '-e', type=int, help='number of epochs to train')
     parser.add_argument('--iteration', type=int, help='number of iterations to train')

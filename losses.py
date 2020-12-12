@@ -35,7 +35,7 @@ class ImagePool():
 def add_noise(h, sigma): 
     xp = cuda.get_array_module(h.data)
     if chainer.config.train and sigma>0:
-        return h + sigma * xp.random.randn(*h.data.shape, dtype=h.dtype)
+        return h + sigma * xp.random.randn(*h.data.shape).astype(h.dtype)
     else:
         return h
 
