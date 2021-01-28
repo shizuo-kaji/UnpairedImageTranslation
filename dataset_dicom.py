@@ -27,7 +27,7 @@ class Dataset(dataset_mixin.DatasetMixin):
             self.crop = (args.crop_height,args.crop_width)
         else:
             self.crop=( 16*((512-2*self.random_tr)//16), 16*((512-2*self.random_tr)//16) )
-        num = lambda val : int(re.sub("\\D", "", val))
+        num = lambda val : int(re.sub("\\D", "", val+"0"))
 
         print("Loading Dataset from: {}".format(path))
         dirlist = [path]
@@ -42,7 +42,7 @@ class Dataset(dataset_mixin.DatasetMixin):
             loc = []
             for f in files:
                 ds = dicom.dcmread(f, force=True)
-                #ds.file_meta.TransferSyntaxUID = dicom.uid.ImplicitVRLittleEndian
+                ds.file_meta.TransferSyntaxUID = dicom.uid.ImplicitVRLittleEndian
                 # sort slices according to SliceLocation header
                 if hasattr(ds, 'ImagePositionPatient') and (args.slice_range is not None): # Thanks to johnrickman for letting me know to use this DICOM entry
 #                if hasattr(ds, 'SliceLocation'):

@@ -185,22 +185,16 @@ if __name__ == '__main__':
                     cycle = dec_i(enc_i(out))
                 else:
                     cycle = gen_i(out)
-            diff = cycle - imgs
 #            diff = gradimg(cycle)-gradimg(imgs)
-            img_disx.to_cpu()
-            img_disy.to_cpu()
-            imgs.to_cpu()
-            diff.to_cpu()
-            cycle.to_cpu()
-            tv.to_cpu()
-            perc_diff.to_cpu()
+            for var in [img_disx, img_disy, imgs, cycle, tv, perc_diff]:
+                var.to_cpu()
             img_disx = img_disx.array
             img_disy = img_disy.array
             imgs = imgs.array
-            cycle_diff = diff.array
             cycle = cycle.array
             tv = tv.array
             perc_diff = perc_diff.array
+            cycle_diff = cycle - imgs
 
         ##
         out.to_cpu()
@@ -211,7 +205,10 @@ if __name__ == '__main__':
             dname = os.path.dirname(fn)
             fn = os.path.basename(os.path.splitext(fn)[0])
             print("\nProcessing {}".format(fn))
-            new = dataset.var2img(out[i]) 
+            if args.imgtype=="dcm":
+                new = 0.5*(1.0+out[i])*args.HU_rangeB + args.HU_baseB
+            else:
+                new = dataset.var2img(out[i]) 
             print("raw value: {} {}".format(np.min(out[i]),np.max(out[i])))
             #print(new.shape)
 

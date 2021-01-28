@@ -72,8 +72,8 @@ def arguments():
     parser.add_argument('--HU_baseB', '-hubb', type=int, help='minimum HU value to be accounted for')
     parser.add_argument('--HU_rangeB', '-hurb', type=int, help='the maximum HU value to be accounted for will be HU_base+HU_range')
     parser.add_argument('--slice_range', '-sr', type=float, nargs="*", help='z-coords of slices used')
-    parser.add_argument('--forceSpacing', '-fs', type=float, help='scale dicom to match the specified spacing')
-    parser.add_argument('--num_slices', '-ns', type=int, help='number of slices stacked together (2.5 dimensional)')
+    parser.add_argument('--forceSpacing', '-fs', type=float, help='scale dicom to match the specified spacing (pixel size)')
+    parser.add_argument('--num_slices', '-ns', type=int, help='number of slices stacked together (for 2.5 dimensional model)')
 
     # discriminator
     parser.add_argument('--dis_pretrained', '-dp', type=str, choices=["","vgg","resnet"], help='Use pretrained ResNet/VGG as discriminator')

@@ -285,6 +285,7 @@ class Encoder(chainer.Chain):
                     self.layers = ['conv{}_2'.format(i) for i in range(1,min(3,args.gen_ndown+1))]
                     self.layers.extend(['conv{}_3'.format(i) for i in range(3,args.gen_ndown+1)])
                 if pretrained_model is None:
+                    self.update_base = True
                     if "resnet" in args.gen_pretrained_encoder:
                         self.base = L.ResNet50Layers()
                     else:
