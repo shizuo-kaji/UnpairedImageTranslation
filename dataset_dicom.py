@@ -5,17 +5,19 @@ import glob
 
 from chainer.dataset import dataset_mixin
 import numpy as np
+import PIL
 from skimage.transform import rescale
 from chainercv.transforms import random_crop,center_crop,resize,rotate
 from consts import dtypes
 
 class Dataset(dataset_mixin.DatasetMixin):
-    def __init__(self, path, args, base, rang, random_tr=0, random_rot=0):
+    def __init__(self, path, args, base, rang, random_tr=0, random_rot=0, random_scale=0):
         self.path = path
         self.base = base
         self.range = rang
         self.random_tr = random_tr
         self.random_rot = random_rot
+        self.random_scale = random_scale
         self.ch = args.num_slices
         self.forceSpacing = args.forceSpacing
         self.dtype = dtypes[args.dtype]
@@ -96,7 +98,7 @@ class Dataset(dataset_mixin.DatasetMixin):
 
     def overwrite(self,new,i,salt):
         ref_dicom = dicom.dcmread(self.get_img_path(i), force=True)
-        #ref_dicom.file_meta.TransferSyntaxUID = dicom.uid.ExplicitVRLittleEndian #dicom.uid.ImplicitVRLittleEndian
+        ref_dicom.file_meta.TransferSyntaxUID = dicom.uid.ExplicitVRLittleEndian #dicom.uid.ImplicitVRLittleEndian
         #ref_dicom.is_little_endian = True
         #ref_dicom.is_implicit_VR = False
         dt=ref_dicom.pixel_array.dtype
@@ -131,6 +133,12 @@ class Dataset(dataset_mixin.DatasetMixin):
         j,k = self.idx[i]
         img = self.dcms[j][(k-(self.ch-1)//2):(k+(self.ch+1)//2)]
         ## TODO: multi channel
+        if self.random_scale>0:
+            r = np.random.uniform(1-self.random_scale,1+self.random_scale)
+            img = resize(img, (int(img.shape[1]*r),int(img.shape[2]*r)), interpolation=PIL.Image.LANCZOS)
         if self.random_rot>0:
             img = rotate(img, np.random.uniform(-self.random_rot,self.random_rot),expand=False, fill=-1)
+        if img.shape[1]<self.crop[0]+2*self.random_tr or img.shape[2] < self.crop[1]+2*self.random_tr:
+            p = max(self.crop[0]+2*self.random_tr-img.shape[1],self.crop[1]+2*self.random_tr-img.shape[2])
+            img = np.pad(img,((0,0),(p,p),(p,p)),'edge')
         return random_crop(img,self.crop).astype(self.dtype)

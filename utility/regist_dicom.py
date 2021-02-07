@@ -43,8 +43,16 @@ def find_translation_centre(img, threshold):
 #    bg = measure.label(img < threshold)
 #    for i in range(bg.max()+1):
 
+# translating image
+def translate(img, x, y):
+    height, width = img.shape
+    p = abs(x)
+    q = abs(y)
+    nimg = np.pad(img,[(q,q),(p,p)],"edge")
+    return(nimg[q-y:q-y+height,p-x:p-x+width])
+
 # load and scale DICOM
-def load_dicom(fn, pad=0, forceSpacing=None, scaling=None, cropw=None, croph=None):
+def load_dicom(fn, pad=0, forceSpacing=None, scaling=None, cropw=None, croph=None, random_translate=0):
     ref_dicom = dicom.dcmread(fn, force=True)
     ref_dicom.file_meta.TransferSyntaxUID = dicom.uid.ImplicitVRLittleEndian
     dt=ref_dicom.pixel_array.dtype
@@ -53,6 +61,10 @@ def load_dicom(fn, pad=0, forceSpacing=None, scaling=None, cropw=None, croph=Non
         scaling = float(ref_dicom.PixelSpacing[0])/forceSpacing
     if scaling is not None:
         img = rescale(img,scaling,mode="reflect",preserve_range=True)
+    if random_translate>0:
+        x = random.randint(-random_translate,random_translate)
+        y = random.randint(-random_translate,random_translate)
+        img = translate(img, x, y)
     # padding
     if pad>0:
         img = np.pad(img,((pad,pad),(pad,pad)),constant_values=img[0,0])        
@@ -68,7 +80,8 @@ def load_dicom(fn, pad=0, forceSpacing=None, scaling=None, cropw=None, croph=Non
 #fix = np.clip(fix,-1024,1000)+1024  ## correction for plan 
 
 parser = argparse.ArgumentParser(description='Simple image registration by translation')
-parser.add_argument('--fixed_img', help='fixed reference image')
+parser.add_argument('--fixed_img', '-f', help='fixed reference image')
+parser.add_argument('--mask_img', '-m', help='mask image')
 parser.add_argument('--window_X', '-wx', type=int, default=400)
 parser.add_argument('--window_Y', '-wy', type=int, default=300)
 parser.add_argument('--ystart', '-y', type=int, default=100)
@@ -76,14 +89,13 @@ parser.add_argument('--xstart', '-x', type=int, default=40)
 parser.add_argument('--range_X', '-rx', type=int, default=40)
 parser.add_argument('--range_Y', '-ry', type=int, default=15)
 parser.add_argument('--translate', '-tr', type=int, nargs=2, default=None)
-parser.add_argument('--threshold', '-th', type=float, default=-900)
-parser.add_argument('--root', '-R', default='./target/',
-                    help='Root directory path of image files')
-parser.add_argument('--out', '-o', default='./out/',
-                    help='output directory')
+parser.add_argument('--threshold', '-th', type=float, default=100)
+parser.add_argument('--root', '-R', default='./target/', help='Root directory path of image files')
+parser.add_argument('--output', '-o', default='./out/',help='output directory')
 parser.add_argument('--scale', '-s', type=float, default=None)
 parser.add_argument('--forceSpacing', '-fs', type=float, default=None, help='scale dicom to match the specified spacing (pixel size)')
 parser.add_argument('--padding', '-p', type=int, default=0)
+parser.add_argument('--random_translate', '-rt', default=0, type=int, help='jitter input images by random translation (in pixel)')
 parser.add_argument('--crop_width', '-cw', type=int, help='this value may have to be divisible by a large power of two (if you encounter errors)')
 parser.add_argument('--crop_height', '-ch', type=int, help='this value may have to be divisible by a large power of two (if you encounter errors)')
 parser.add_argument('--anonimise', action="store_true", help='strip personal information from saved DICOM')
@@ -94,13 +106,21 @@ if args.fixed_img is not None:
     print("Fixed reference image: {}".format(args.fixed_img))
     fix = load_dicom(args.fixed_img, args.padding, args.forceSpacing, args.scale, args.crop_width, args.crop_height)
 
+if args.mask_img is not None:
+    print("mask image: {}".format(args.mask_img))
+    mask = load_dicom(args.mask_img, args.padding, args.forceSpacing, args.scale, args.crop_width, args.crop_height)>0
+    args.crop_width = mask.shape[1]
+    args.crop_height = mask.shape[0]
+
+
 dns = [args.root]
 for root_dir in [args.root, os.path.join(args.root,"trainA"),os.path.join(args.root,"trainB"),os.path.join(args.root,"testA"),os.path.join(args.root,"testB")]:
     for root, dirs, files in os.walk(root_dir):
         for dirname in dirs:
             dns.append(os.path.join(root, dirname))
+            
 for dir in dns:
-    print("\n Processing {} \n".format(dir))
+    print("\n Processing {}".format(dir))
     sum_x = 0
     sum_y = 0
     cnt = 0
@@ -124,26 +144,26 @@ for dir in dns:
         x,y = args.translate
 
     # save
+    os.makedirs(dir.replace(args.root,args.output,1), exist_ok=True)
     for fn in glob.glob(os.path.join(dir,"*.dcm")):
-        print("Writing: {}".format(fn))
-        move = load_dicom(fn, args.padding, args.forceSpacing, args.scale, args.crop_width, args.crop_height)
-        height, width = move.shape
-        p = abs(x)
-        q = abs(y)
-        move = np.pad(move,[(q,q),(p,p)],"edge")
-        move = move[q-y:q-y+height,p-x:p-x+width]
+        #print("Writing: {}".format(fn))
+        move = load_dicom(fn, args.padding, args.forceSpacing, args.scale, args.crop_width, args.crop_height, args.random_translate)
+        move = translate(move, x, y)
+        if args.mask_img:
+            move[mask==0]=0
         # write back image
         ds = dicom.dcmread(fn, force=True)
 #        ds.PixelData = move.tostring()
         ds.PixelData = move.tobytes()
     # update the information regarding the shape of the data array
         ds.Rows, ds.Columns = move.shape
-    #    dn, fn = os.path.split(fn)
-    #    path = '{:s}/{:s}'.format(args.out,fn)
+        if args.forceSpacing is not None:
+            ds.PixelSpacing[0] = args.forceSpacing
+            ds.PixelSpacing[1] = args.forceSpacing
         if args.anonimise:
             ds.remove_private_tags()
             for tag in ds.keys():
                 print(ds[tag])
                 if 'Name' in ds[tag].name:
                     ds[tag].value = '00'
-        ds.save_as(fn)
+        ds.save_as(fn.replace(args.root,args.output,1))

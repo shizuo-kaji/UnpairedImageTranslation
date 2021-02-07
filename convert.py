@@ -280,6 +280,7 @@ if __name__ == '__main__':
 
     elapsed_time = time.time() - start
     print ("{} images in {} sec".format(cnt,elapsed_time))
+    print ("Output: {}".format(outdir))
 
 
 

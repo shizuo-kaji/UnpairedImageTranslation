@@ -11,7 +11,7 @@ default_values = {'root': 'data', 'batch_size': 1, 'gpu': [0], 'out': 'result', 
     'snapinterval': -1, 'weight_decay': 1e-7, 'optimizer': 'Adam', \
     'crop_width': None, 'crop_height': None, 'grey': None, 'dtype': 'fp32', 'load_optimizer': False, \
     'eqconv': False, 'spconv': False, 'senet': False, \
-    'random_translate': 4, 'random_rotation': 0, 'noise': 0, 'noise_z': 0, \
+    'random_translate': 4, 'random_rotation': 0, 'random_scale': 0, 'noise': 0, 'noise_z': 0, \
     'HU_baseA': -1024, 'HU_rangeA': 1200, 'HU_baseB': -1024, 'HU_rangeB': 1200, 'slice_range': None, 'forceSpacing': -1, 'num_slices': 1, \
     'dis_pretrained': '', 'dis_pretrained_lr_ratio': 0, 'dis_activation': 'lrelu', 'dis_out_activation': 'none', 'dis_chs': None, \
     'dis_basech': 64, 'dis_ndown': 3, 'dis_ksize': 4, 'dis_down': 'down', 'dis_sample': 'down', 'dis_jitter': 0.2, 'dis_dropout': None, \
@@ -63,6 +63,7 @@ def arguments():
     # data augmentation
     parser.add_argument('--random_translate', '-rt', type=int, help='jitter input images by random translation (in pixel)')
     parser.add_argument('--random_rotation', '-rr', type=int, help='jitter input images by random rotation (in degree)')
+    parser.add_argument('--random_scale', '-rs', type=float, help='jitter input images by random scaling (in ratio)')
     parser.add_argument('--noise', '-n', type=float, help='strength of noise injection')
     parser.add_argument('--noise_z', '-nz', type=float, help='strength of noise injection for the latent variable')
 

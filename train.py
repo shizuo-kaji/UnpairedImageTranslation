@@ -59,13 +59,15 @@ def main():
     ## dataset iterator
     print("Setting up data iterators...")
     train_A_dataset = Dataset(
-        path=os.path.join(args.root, 'trainA'), args=args, base=args.HU_baseA, rang=args.HU_rangeA, random_tr=args.random_translate, random_rot=args.random_rotation)
+        path=os.path.join(args.root, 'trainA'), args=args, base=args.HU_baseA, rang=args.HU_rangeA, random_tr=args.random_translate, random_rot=args.random_rotation, random_scale=args.random_scale)
     train_B_dataset = Dataset(
-        path=os.path.join(args.root, 'trainB'), args=args, base=args.HU_baseB, rang=args.HU_rangeB, random_tr=args.random_translate, random_rot=args.random_rotation)
+        path=os.path.join(args.root, 'trainB'), args=args, base=args.HU_baseB, rang=args.HU_rangeB, random_tr=args.random_translate, random_rot=args.random_rotation, random_scale=args.random_scale)
     test_A_dataset = Dataset(
-        path=os.path.join(args.root, 'testA'), args=args, base=args.HU_baseA, rang=args.HU_rangeA, random_tr=0, random_rot=0)
+        path=os.path.join(args.root, 'testA'), args=args, base=args.HU_baseA, rang=args.HU_rangeA, random_tr=args.random_translate, random_rot=args.random_rotation, random_scale=args.random_scale)
+#        path=os.path.join(args.root, 'testA'), args=args, base=args.HU_baseA, rang=args.HU_rangeA, random_tr=0, random_rot=0)
     test_B_dataset = Dataset(
-        path=os.path.join(args.root, 'testB'), args=args, base=args.HU_baseB, rang=args.HU_rangeB, random_tr=0, random_rot=0)
+        path=os.path.join(args.root, 'testB'), args=args, base=args.HU_baseB, rang=args.HU_rangeB, random_tr=args.random_translate, random_rot=args.random_rotation, random_scale=args.random_scale)
+#        path=os.path.join(args.root, 'testB'), args=args, base=args.HU_baseB, rang=args.HU_rangeB, random_tr=0, random_rot=0)
 
     args.ch = train_A_dataset.ch
     args.out_ch = train_B_dataset.ch
