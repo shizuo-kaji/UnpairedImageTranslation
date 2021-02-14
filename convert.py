@@ -185,16 +185,21 @@ if __name__ == '__main__':
                     cycle = dec_i(enc_i(out))
                 else:
                     cycle = gen_i(out)
-#            diff = gradimg(cycle)-gradimg(imgs)
-            for var in [img_disx, img_disy, imgs, cycle, tv, perc_diff]:
+            grad_diff = gradimg(out)-gradimg(imgs)
+            air_diff = ((out.array <= args.air_threshold)^(imgs.array <= args.air_threshold)).astype(out.xp.float32) * (out-imgs)## XOR
+
+            for var in [img_disx, img_disy, imgs, cycle, tv, perc_diff, grad_diff, air_diff]:
                 var.to_cpu()
             img_disx = img_disx.array
             img_disy = img_disy.array
             imgs = imgs.array
             cycle = cycle.array
             tv = tv.array
-            perc_diff = perc_diff.array
-            cycle_diff = cycle - imgs
+            perc_diff = 0.05*np.abs(perc_diff.array)
+            grad_diff = 0.5*np.abs(grad_diff.array)
+            air_diff = 0.5*np.abs(air_diff.array)
+            cycle_diff = 0.5*np.abs(cycle - imgs)
+
 
         ##
         out.to_cpu()
@@ -236,7 +241,6 @@ if __name__ == '__main__':
                 # cycle difference
                 path = os.path.join(outdir,'{:s}_2cycle_diff.png'.format(fn))
 #                cycle_diff[i] = (cycle_diff[i]+1)/(imgs[i]+2)   # [0,2]/[1,3] = (0.0,1.5)
-                cycle_diff[i] = np.abs(0.5*cycle_diff[i])
                 print("cycle diff: {} {} {}".format(np.min(cycle_diff[i]),np.mean(cycle_diff[i]),np.max(cycle_diff[i])))
                 cv2.imwrite(path, heatmap(cycle_diff[i,0],imgs[i]))
                 # converted
@@ -246,6 +250,14 @@ if __name__ == '__main__':
                 path = os.path.join(outdir,'{:s}_3perc_diff.png'.format(fn))
                 print("perc diff: {} {} {}".format(np.min(perc_diff[i]),np.mean(perc_diff[i]),np.max(perc_diff[i])))
                 cv2.imwrite(path, heatmap(perc_diff[i,0],out[i]))
+                # gradient difference
+                path = os.path.join(outdir,'{:s}_4grad_diff.png'.format(fn))
+                print("grad diff: {} {} {}".format(np.min(grad_diff[i]),np.mean(grad_diff[i]),np.max(grad_diff[i])))
+                cv2.imwrite(path, heatmap(grad_diff[i,0],out[i]))
+                # air region difference
+                path = os.path.join(outdir,'{:s}_5air_diff.png'.format(fn))
+                print("air diff: {} {} {}".format(np.min(air_diff[i]),np.mean(air_diff[i]),np.max(air_diff[i])))
+                cv2.imwrite(path, heatmap(air_diff[i,0],out[i]))
                 # discriminator for original
                 if(img_disx[i].shape[0]==2):
                     wg=np.tanh(img_disx[i,1])+1
@@ -255,19 +267,19 @@ if __name__ == '__main__':
                     d = (1-img_disx[i,0])*wg
                 else:
                     d = 1-img_disx[i,0]
-                path = os.path.join(outdir,'{:s}_4disx.png'.format(fn))
+                path = os.path.join(outdir,'{:s}_5disx.png'.format(fn))
                 print("dis x: {} {} {}".format(np.min(d),np.mean(d),np.max(d)))
                 cv2.imwrite(path, heatmap(d,imgs[i]))
                 # discriminator for converted
                 if(img_disy[i].shape[0]==2):
                     wg=np.tanh(img_disy[i,1])+1
-                    path = os.path.join(outdir,'{:s}_8disy_weight.png'.format(fn))
+                    path = os.path.join(outdir,'{:s}_6disy_weight.png'.format(fn))
                     print("dis y_w: {} {} {}".format(np.min(wg),np.mean(wg),np.max(wg)))
                     cv2.imwrite(path, heatmap(wg,out[i]))
                     d = (1-img_disy[i,0])*wg
                 else:
                     d = 1-img_disy[i,0]
-                path = os.path.join(outdir,'{:s}_7disy.png'.format(fn))
+                path = os.path.join(outdir,'{:s}_6disy.png'.format(fn))
                 print("dis y: {} {} {}".format(np.min(d),np.mean(d),np.max(d)))
                 cv2.imwrite(path, heatmap(d,out[i]))
                 # total variation

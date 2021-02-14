@@ -20,7 +20,7 @@ default_values = {'root': 'data', 'batch_size': 1, 'gpu': [0], 'out': 'result', 
     'gen_ndown': 3, 'gen_basech': 32, 'gen_fc': 0, 'gen_fc_activation': 'relu', 'gen_nblock': 9, 'gen_ksize': 3, \
     'gen_sample': 'none-7', 'gen_down': 'down', 'gen_up': 'unpool', 'gen_dropout': None, 'gen_norm': 'instance', \
     'unet': 'none', 'skipdim': 4, 'latent_dim': -1, 'single_encoder': False, \
-    'lambda_A': 10, 'lambda_B': 10, 'lambda_Az': 10, 'lambda_Bz': 10, 'lambda_identity_x': 0, 'lambda_identity_y': 0, \
+    'lambda_A': 10, 'lambda_B': 10, 'lambda_Az': 1, 'lambda_Bz': 1, 'lambda_identity_x': 0, 'lambda_identity_y': 0, \
     'perceptual_layer': 'conv1_2', 'lambda_grad': 0, 'lambda_air': 0, 'lambda_domain': 0.1, 'lambda_idempotence': 0, \
     'lambda_dis_y': 1, 'lambda_dis_x': 1, 'lambda_dis_z': 0, 'lambda_reg': 0, 'lambda_tv': 0, 'tv_tau': 1e-3, 'tv_method': 'usual', \
     'lambda_wgan_gp': 10, 'air_threshold': -0.997, \
