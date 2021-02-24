@@ -5,6 +5,7 @@ import glob
 from chainer.dataset import dataset_mixin
 import numpy as np
 from PIL import Image
+import PIL
 
 from chainercv.transforms import random_crop,center_crop,random_flip,rotate
 from chainercv.transforms import resize
@@ -14,11 +15,12 @@ from consts import dtypes
 
 ## load images everytime from disk: slower but low memory usage
 class DatasetOutMem(dataset_mixin.DatasetMixin):
-    def __init__(self, path, args, base, rang, random_tr=0, random_rot=0):
+    def __init__(self, path, args, base, rang, random_tr=0, random_rot=0, random_scale=0):
         self.path = path
         self.names = []
         self.random_tr = random_tr
         self.random_rot = random_rot
+        self.random_scale = random_scale
         self.color=not args.grey
         self.ch = 3 if self.color else 1
         self.imgtype=args.imgtype
@@ -30,7 +32,11 @@ class DatasetOutMem(dataset_mixin.DatasetMixin):
         if args.crop_height and args.crop_width:
             self.crop = (args.crop_height,args.crop_width)
         else:
-            self.crop=None
+            if self.imgtype == "npy":
+                img = np.load(self.get_img_path(0))
+            else:
+                img = read_image(self.get_img_path(0))
+            self.crop=( 16*((img.shape[1]-2*self.random_tr)//16), 16*((img.shape[2]-2*self.random_tr)//16) )
         self.names = sorted(self.names)
         print("Cropped to: ",self.crop)
         print("Loaded: {} images from {}".format(len(self.names),path))
@@ -57,18 +63,18 @@ class DatasetOutMem(dataset_mixin.DatasetMixin):
             img = self.img2var(read_image(self.get_img_path(i),color=self.color))
         
 #        img = resize(img, (self.resize_to, self.resize_to))
-        if self.crop:
-            H, W = self.crop
-        else:
-            H, W = ( 16*((img.shape[1]-2*self.random_tr)//16), 16*((img.shape[2]-2*self.random_tr)//16) )
-        if img.shape[1]<H+2*self.random_tr or img.shape[2] < W+2*self.random_tr:
-            p = max(H+2*self.random_tr-img.shape[1],W+2*self.random_tr-img.shape[2])
-            img = np.pad(img,((0,0),(p,p),(p,p)),'edge')
-        img = random_crop(center_crop(img, (H+2*self.random_tr,W+2*self.random_tr)),(H,W))
+        if self.random_scale>0:
+            r = np.random.uniform(1-self.random_scale,1+self.random_scale)
+            img = resize(img, (int(img.shape[1]*r),int(img.shape[2]*r)), interpolation=PIL.Image.LANCZOS)
         if self.random_tr:
             img = random_flip(img, x_random=True)
         if self.random_rot>0:
             img = rotate(img, np.random.uniform(-self.random_rot,self.random_rot),expand=False, fill=-1)
+        H, W = self.crop
+        if img.shape[1]<H+2*self.random_tr or img.shape[2] < W+2*self.random_tr:
+            p = max(H+2*self.random_tr-img.shape[1],W+2*self.random_tr-img.shape[2])
+            img = np.pad(img,((0,0),(p,p),(p,p)),'edge')
+        img = random_crop(center_crop(img, (H+2*self.random_tr,W+2*self.random_tr)),(H,W))
         return img.astype(self.dtype)
 
     def mask(self,fn):

@@ -79,9 +79,9 @@ class VisEvaluator(extensions.Evaluator):
                 else:
                     ax = fig.add_subplot(gs[j+lb,i%n_col])
                     if(imgs[j].shape[2] == 1):
-                        ax.imshow(imgs[j][:,:,0], interpolation='none',cmap='gray',vmin=0,vmax=1)
+                        ax.imshow(np.clip(imgs[j][:,:,0],0,1), interpolation='none',cmap='gray',vmin=0,vmax=1)
                     else:
-                        ax.imshow(imgs[j], interpolation='none',vmin=0,vmax=1)
+                        ax.imshow(np.clip(imgs[j],0,1), interpolation='none',vmin=0,vmax=1)
                     ax.set_xticks([])
                     ax.set_yticks([])
 
