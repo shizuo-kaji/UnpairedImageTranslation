@@ -8,9 +8,11 @@ This is an implementation of CycleGAN
 with several enhancements, most notably for dealing with CT images.
 The codes have been used in 
 
-- S. Kida, S. Kaji, K. Nawa, T. Imae, T. Nakamoto, S. Ozaki, T. Ota, Y. Nozawa, and K. Nakagawa, Visual enhancement of Cone-beam CT by use of CycleGAN, Medical Physics, 47-3 (2020), 998--1010, https://doi.org/10.1002/mp.13963
-- S. Kaji and S. Kida, Overview of image-to-image translation by use of deep neural networks: denoising, super-resolution, modality conversion, and reconstruction in  medical imaging, Radiological Physics and Technology,  Volume 12, Issue 3 (2019), pp 235--248. https://doi.org/10.1007/s12194-019-00520-y
-- Toshikazu Imae, Shizuo Kaji, Satoshi Kida, Kanako Matsuda, Shigeharu Takenaka, Atsushi Aoki, Takahiro Nakamoto, Sho Ozaki, Kanabu Nawa, Hideomi Yamashita, Keiichi Nakagawa, and Osamu Abe, Improvement in Image Quality of CBCT during Treatment by Cycle Generative Adversarial Network, Japanese Journal of Radiological Technology, Vol. 76(11), 1173-1184, 2020, DOI: 10.6009/jjrt.2020_JSRT_76.11.1173
+1. S. Kida, S. Kaji, K. Nawa, T. Imae, T. Nakamoto, S. Ozaki, T. Ota, Y. Nozawa, and K. Nakagawa, Visual enhancement of Cone-beam CT by use of CycleGAN, Medical Physics, 47-3 (2020), 998--1010, https://doi.org/10.1002/mp.13963
+2. S. Kaji and S. Kida, Overview of image-to-image translation by use of deep neural networks: denoising, super-resolution, modality conversion, and reconstruction in  medical imaging, Radiological Physics and Technology,  Volume 12, Issue 3 (2019), pp 235--248. https://doi.org/10.1007/s12194-019-00520-y
+3. Toshikazu Imae, Shizuo Kaji, Satoshi Kida, Kanako Matsuda, Shigeharu Takenaka, Atsushi Aoki, Takahiro Nakamoto, Sho Ozaki, Kanabu Nawa, Hideomi Yamashita, Keiichi Nakagawa, and Osamu Abe, Improvement in Image Quality of CBCT during Treatment by Cycle Generative Adversarial Network, Japanese Journal of Radiological Technology, Vol. 76(11), 1173-1184, 2020, DOI: 10.6009/jjrt.2020_JSRT_76.11.1173
+
+Please cite 1. if you use this code in your work.
 
 This code is based on 
 - https://github.com/naoto0804/chainer-cyclegan
@@ -20,12 +22,26 @@ This code is based on
 MIT Licence
 
 ## Requirements
-- GPU (with GeForce 30 RTX series, installation of chainer and cupy can be tricky.)
+- GPU
 - python 3: [Anaconda](https://anaconda.org) is recommended
 - chainer >= 7.1.0, cupy, chainerui, chainercv: install them by
 ```
 pip install cupy,chainer,chainerui,chainercv
 ```
+
+Note that with GeForce 30 RTX series, 
+the installation of chainer and cupy can be a little tricky for now.
+You need CUDA >= 11.1 for these GPUs, and it is supported by CuPy >= v8.
+The latest version of Chainer v7.7.0 available on pip is not compatible with the latest version of CuPy.
+See [here](https://github.com/chainer/chainer/pull/8583).
+You can install the latest Chainer directly from the github repository, which is compatible with the latest version of CuPy.
+For example, follow the following procedure:
+- Install CUDA 11.1
+- pip install cupy-cuda111
+- pip install -U git+https://github.com/chainer/chainer.git
+
+You will see some warning messages, but you can ignore them.
+
 
 ## Training
 - Some demo datasets are available at https://people.eecs.berkeley.edu/~taesung_park/CycleGAN/datasets/
